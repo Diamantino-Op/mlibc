@@ -117,6 +117,10 @@ if not headers_only
 			libc_include_dirs += include_directories(ccdir / 'include-fixed')
 		endif
 
+		if host_machine.system() == 'horizonos'
+			ccdir = ccdir.replace(meson.global_source_root(), '../../..')
+		endif
+
 		rtld_include_dirs += include_directories(ccdir / 'include')
 		libc_include_dirs += include_directories(ccdir / 'include')
 	endif
@@ -283,6 +287,8 @@ elif host_machine.system() == 'nyaux'
 	rtld_include_dirs += include_directories('sysdeps/nyaux/include')
 	libc_include_dirs += include_directories('sysdeps/nyaux/include')
 	subdir('sysdeps/nyaux')
+elif host_machine.system() == 'horizonos'
+	subdir('sysdeps/horizonos')
 # ANCHOR: demo-sysdeps
 elif host_machine.system() == 'demo'
 	subdir('sysdeps/demo')
