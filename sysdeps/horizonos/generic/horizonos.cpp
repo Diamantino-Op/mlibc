@@ -1,5 +1,5 @@
-#include <astral/syscall.h>
-#include <astral/archctl.h>
+#include <horizonos/syscall.h>
+#include <horizonos/archctl.h>
 #include <errno.h>
 
 #ifndef MLIBC_BUILDING_RTLD

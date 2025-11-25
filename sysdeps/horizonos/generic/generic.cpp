@@ -2,12 +2,12 @@
 #include <mlibc/debug.hpp>
 #include <mlibc/all-sysdeps.hpp>
 #include <errno.h>
-#include <astral/syscall.h>
-#include <astral/archctl.h>
+#include <horizonos/syscall.h>
+#include <horizonos/archctl.h>
 #include <string.h>
 #include <stdlib.h>
-#include <asm/ioctls.h>
-#include <poll.h>
+#include <abi-bits/ioctls.h>
+#include <abi-bits/poll.h>
 #include <sys/select.h>
 #include <stdio.h>
 #include <sys/stat.h>
