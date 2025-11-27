@@ -6,8 +6,8 @@
 #include <horizonos/archctl.h>
 #include <string.h>
 #include <stdlib.h>
-#include <abi-bits/ioctls.h>
-#include <abi-bits/poll.h>
+#include <asm/ioctls.h>
+#include <poll.h>
 #include <sys/select.h>
 #include <stdio.h>
 #include <sys/stat.h>

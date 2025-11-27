@@ -302,6 +302,9 @@ elif host_machine.system() == 'nyaux'
 	libc_include_dirs += include_directories('sysdeps/nyaux/include')
 	subdir('sysdeps/nyaux')
 elif host_machine.system() == 'horizonos'
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	subdir('sysdeps/horizonos')
 # ANCHOR: demo-sysdeps
 elif host_machine.system() == 'demo'
