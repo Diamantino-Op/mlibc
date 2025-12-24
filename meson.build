@@ -65,21 +65,35 @@ if not headers_only
 	use_freestnd_hdrs = get_option('use_freestnd_hdrs').disable_auto_if(
 			target_triple.to_lower().contains('mlibc'))
 
-	freestnd_c_hdrs_dep = dependency(
-		'freestnd-c-hdrs-' + host_machine.cpu_family(),
-		required: use_freestnd_hdrs,
-		fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
-	)
-	libc_deps += freestnd_c_hdrs_dep
-	rtld_deps += freestnd_c_hdrs_dep
+	if host_machine.system() != 'horizonos'
+		freestnd_c_hdrs_dep = dependency(
+			'freestnd-c-hdrs-' + host_machine.cpu_family(),
+			required: use_freestnd_hdrs,
+			fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
+		)
+		libc_deps += freestnd_c_hdrs_dep
+		rtld_deps += freestnd_c_hdrs_dep
 
-	freestnd_cxx_hdrs_dep = dependency(
-		'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
-		required: use_freestnd_hdrs,
-		fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
-	)
-	libc_deps += freestnd_cxx_hdrs_dep
-	rtld_deps += freestnd_cxx_hdrs_dep
+		freestnd_cxx_hdrs_dep = dependency(
+			'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
+			required: use_freestnd_hdrs,
+			fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
+		)
+		libc_deps += freestnd_cxx_hdrs_dep
+		rtld_deps += freestnd_cxx_hdrs_dep
+	else
+		deps_proj = subproject('horizon_deps')
+
+		freestnd_c_hdrs_dep = deps_proj.get_variable('freestnd_c_hdrs_dep')
+
+		libc_deps += freestnd_c_hdrs_dep
+		rtld_deps += freestnd_c_hdrs_dep
+
+		freestnd_cxx_hdrs_dep = deps_proj.get_variable('freestnd_cxx_hdrs_dep')
+
+		libc_deps += freestnd_cxx_hdrs_dep
+		rtld_deps += freestnd_cxx_hdrs_dep
+	endif
 
 	frigg_dep = dependency(
 		'frigg',
@@ -129,6 +143,15 @@ if not headers_only
 
 		if ccdir == ''
 			error('could not find compiler-specific header directory')
+		endif
+
+		if c_compiler.get_id() == 'gcc' and fs.exists(ccdir / 'include-fixed')
+			rtld_include_dirs += include_directories(ccdir / 'include-fixed')
+			libc_include_dirs += include_directories(ccdir / 'include-fixed')
+		endif
+
+		if host_machine.system() == 'horizonos'
+			ccdir = ccdir.replace(meson.global_source_root(), '../../..')
 		endif
 
 		rtld_include_dirs += include_directories(ccdir / 'include')
@@ -276,6 +299,15 @@ elif host_machine.system() == 'menix'
 	rtld_include_dirs += include_directories('sysdeps/menix/include')
 	libc_include_dirs += include_directories('sysdeps/menix/include')
 	subdir('sysdeps/menix')
+elif host_machine.system() == 'nyaux'
+	rtld_include_dirs += include_directories('sysdeps/nyaux/include')
+	libc_include_dirs += include_directories('sysdeps/nyaux/include')
+	subdir('sysdeps/nyaux')
+elif host_machine.system() == 'horizonos'
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
+	subdir('sysdeps/horizonos')
 # ANCHOR: demo-sysdeps
 elif host_machine.system() == 'demo'
 	subdir('sysdeps/demo')
