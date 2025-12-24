@@ -18,7 +18,9 @@
 #include <mlibc/allocator.hpp>
 #include <mlibc/debug.hpp>
 #include <mlibc/file-io.hpp>
+#include <mlibc/locale.hpp>
 #include <mlibc/ansi-sysdeps.hpp>
+#include <mlibc/stdlib.hpp>
 #include <frg/mutex.hpp>
 #include <frg/expected.hpp>
 #include <frg/printf.hpp>
@@ -26,7 +28,14 @@
 template<typename F>
 struct PrintfAgent {
 	PrintfAgent(F *formatter, frg::va_struct *vsp)
-	: _formatter{formatter}, _vsp{vsp} { }
+	: _formatter{formatter}, _vsp{vsp} {
+		auto l = mlibc::getActiveLocale();
+		locale_opts = frg::locale_options(
+			l->numeric.get(DECIMAL_POINT).asString().data(),
+			l->numeric.get(THOUSANDS_SEP).asString().data(),
+			reinterpret_cast<const char *>(l->numeric.get(GROUPING).asByteSpan().data())
+		);
+	}
 
 	frg::expected<frg::format_error> operator() (char c) {
 		_formatter->append(c);
@@ -57,10 +66,10 @@ struct PrintfAgent {
 			frg::do_printf_chars(*_formatter, t, opts, szmod, _vsp);
 			break;
 		case 'd': case 'i': case 'o': case 'x': case 'X': case 'b': case 'B': case 'u':
-			frg::do_printf_ints(*_formatter, t, opts, szmod, _vsp);
+			frg::do_printf_ints(*_formatter, t, opts, szmod, _vsp, locale_opts);
 			break;
 		case 'f': case 'F': case 'g': case 'G': case 'e': case 'E': case 'a': case 'A':
-			frg::do_printf_floats(*_formatter, t, opts, szmod, _vsp);
+			frg::do_printf_floats(*_formatter, t, opts, szmod, _vsp, locale_opts);
 			break;
 		case 'm':
 			__ensure(!opts.fill_zeros);
@@ -117,8 +126,30 @@ struct PrintfAgent {
 		return {};
 	}
 
+	std::optional<frg::printf_arg_type> format_type(char t, frg::printf_size_mod sz) {
+		switch(t) {
+			case 'c':
+				if (sz == frg::printf_size_mod::long_size)
+					return frg::printf_arg_type::WCHAR;
+				else
+					return frg::printf_arg_type::CHAR;
+			case 's': case 'n':
+				return frg::printf_arg_type::POINTER;
+			case 'f': case 'F': case 'g': case 'G': case 'e': case 'E': case 'a': case 'A':
+				return frg::printf_arg_type::DOUBLE;
+			case 'd': case 'i': case 'b': case 'B': case 'o': case 'x': case 'X': case 'u':
+				return frg::printf_arg_type::INT;
+			default:
+				_formatter->append("unknown format '");
+				_formatter->append(t);
+				_formatter->append('\'');
+				return std::nullopt;
+		}
+	}
+
 private:
 	F *_formatter;
+	frg::locale_options locale_opts;
 	frg::va_struct *_vsp;
 };
 
@@ -276,13 +307,44 @@ int renameat(int olddirfd, const char *old_path, int newdirfd, const char *new_p
 }
 
 FILE *tmpfile(void) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_unlinkat, nullptr);
+
+	int fd = 0;
+	char pattern[] = "/tmp/tmpfile_XXXXXX";
+	int res = mlibc::mkostemps(pattern, 0, 0, &fd);
+	if (res)
+		return nullptr;
+
+	res = mlibc::sys_unlinkat(AT_FDCWD, pattern, 0);
+	if (res) {
+		mlibc::sys_close(fd);
+		errno = res;
+		return nullptr;
+	}
+
+	return frg::construct<mlibc::fd_file>(getAllocator(), fd, mlibc::file_dispose_cb<mlibc::fd_file>);
+
 }
 
-char *tmpnam(char *) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+char *tmpnam(char *buf) {
+	static thread_local char internalBuffer[L_tmpnam];
+	char *result = buf ? buf : internalBuffer;
+
+	for (size_t i = 0; i < 100; i++) {
+		int ret = snprintf(result, L_tmpnam, "/tmp/tmpnam_%06X", rand() & 0xFFFFFF);
+		if (ret < 18)
+			return nullptr;
+
+		int fd;
+		ret = mlibc::sys_open(result, O_RDONLY, 0666, &fd);
+		if (ret == 0) {
+			mlibc::sys_close(fd);
+		} else {
+			return result;
+		}
+	}
+
+	return nullptr;
 }
 
 // fflush() is provided by the POSIX sublibrary
@@ -1133,9 +1195,11 @@ int vfprintf(FILE *__restrict stream, const char *__restrict format, __builtin_v
 	frg::unique_lock lock(file->_lock);
 	StreamPrinter p{stream};
 //	mlibc::infoLogger() << "printf(" << format << ")" << frg::endlog;
-	auto res = frg::printf_format(PrintfAgent{&p, &vs}, format, &vs);
-	if (!res)
-		return -static_cast<int>(res.error());
+	auto res = frg::printf_format<NL_ARGMAX>(PrintfAgent{&p, &vs}, format, &vs);
+	if (!res) {
+		errno = EINVAL;
+		return -1;
+	}
 
 	return p.count;
 }
@@ -1174,9 +1238,8 @@ int vprintf(const char *__restrict format, __builtin_va_list args){
 	return vfprintf(stdout, format, args);
 }
 
-int vscanf(const char *__restrict, __builtin_va_list) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+int vscanf(const char *__restrict format, __builtin_va_list args) {
+	return vfscanf(stdin, format, args);
 }
 
 int vsnprintf(char *__restrict buffer, size_t max_size,
@@ -1187,9 +1250,11 @@ int vsnprintf(char *__restrict buffer, size_t max_size,
 	va_copy(vs.args, args);
 	LimitedPrinter p{buffer, max_size ? max_size - 1 : 0};
 //	mlibc::infoLogger() << "printf(" << format << ")" << frg::endlog;
-	auto res = frg::printf_format(PrintfAgent{&p, &vs}, format, &vs);
-	if (!res)
-		return -static_cast<int>(res.error());
+	auto res = frg::printf_format<NL_ARGMAX>(PrintfAgent{&p, &vs}, format, &vs);
+	if (!res) {
+		errno = EINVAL;
+		return -1;
+	}
 	if (max_size)
 		p.buffer[frg::min(max_size - 1, p.count)] = 0;
 	return p.count;
@@ -1202,9 +1267,11 @@ int vsprintf(char *__restrict buffer, const char *__restrict format, __builtin_v
 	va_copy(vs.args, args);
 	BufferPrinter p(buffer);
 //	mlibc::infoLogger() << "printf(" << format << ")" << frg::endlog;
-	auto res = frg::printf_format(PrintfAgent{&p, &vs}, format, &vs);
-	if (!res)
-		return -static_cast<int>(res.error());
+	auto res = frg::printf_format<NL_ARGMAX>(PrintfAgent{&p, &vs}, format, &vs);
+	if (!res) {
+		errno = EINVAL;
+		return -1;
+	}
 	p.buffer[p.count] = 0;
 	return p.count;
 }
@@ -1348,7 +1415,7 @@ int puts(const char *string) {
 	}
 
 	size_t unused;
-	if (!file->write("\n", 1, &unused)) {
+	if (file->write("\n", 1, &unused)) {
 		return EOF;
 	}
 
@@ -1502,9 +1569,11 @@ int vasprintf(char **out, const char *format, __builtin_va_list args) {
 	va_copy(vs.args, args);
 	ResizePrinter p;
 //	mlibc::infoLogger() << "printf(" << format << ")" << frg::endlog;
-	auto res = frg::printf_format(PrintfAgent{&p, &vs}, format, &vs);
-	if (!res)
-		return -static_cast<int>(res.error());
+	auto res = frg::printf_format<NL_ARGMAX>(PrintfAgent{&p, &vs}, format, &vs);
+	if (!res) {
+		errno = EINVAL;
+		return -1;
+	}
 	p.expand();
 	p.buffer[p.count] = 0;
 	*out = p.buffer;

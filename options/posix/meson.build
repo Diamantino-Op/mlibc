@@ -71,7 +71,8 @@ if not headers_only
 		pic: true,
 		include_directories: libc_include_dirs,
 		dependencies: libc_deps,
-		c_args: ['-Wno-unused', '-Wno-implicit', '-Wno-parentheses', '-Wno-sign-compare', '-Wno-attributes', '-Wno-unknown-pragmas', '-Wno-implicit-fallthrough', '-Wno-unused-parameter']
+		c_args: mlibc_c_args + ['-Wno-unused', '-Wno-implicit', '-Wno-parentheses', '-Wno-sign-compare', '-Wno-attributes', '-Wno-unknown-pragmas', '-Wno-implicit-fallthrough', '-Wno-unused-parameter'],
+		link_args: mlibc_link_args,
 	)
 endif
 
@@ -170,11 +171,14 @@ if not no_headers
 		'include/bits/posix/posix_stdlib.h',
 		'include/bits/posix/posix_string.h',
 		'include/bits/posix/posix_time.h',
+		'include/bits/posix/posix_sys_time.h',
 		'include/bits/posix/posix_wctype.h',
 		'include/bits/posix/stat.h',
 		'include/bits/posix/timeval.h',
 		'include/bits/posix/pthread_t.h',
 		'include/bits/posix/timer_t.h',
+		'include/bits/posix/pthread_types.h',
+		'include/bits/posix/pthread_attr_t.h',
 		subdir: 'bits/posix'
 	)
 endif

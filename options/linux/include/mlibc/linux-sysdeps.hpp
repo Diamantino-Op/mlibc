@@ -4,7 +4,6 @@
 #include <ifaddrs.h>
 #include <sched.h>
 #include <stdarg.h>
-#include <sys/epoll.h>
 #include <sys/sysinfo.h>
 #include <sys/statfs.h>
 #include <poll.h>
@@ -29,20 +28,9 @@ int sys_ioctl(int fd, unsigned long request, void *arg, int *result);
 [[gnu::weak]] int sys_inotify_create(int flags, int *fd);
 [[gnu::weak]] int sys_inotify_add_watch(int ifd, const char *path, uint32_t mask, int *wd);
 [[gnu::weak]] int sys_inotify_rm_watch(int ifd, int wd);
-[[gnu::weak]] int sys_epoll_create(int flags, int *fd);
-[[gnu::weak]] int sys_epoll_ctl(int epfd, int mode, int fd, struct epoll_event *ev);
-[[gnu::weak]] int sys_epoll_pwait(int epfd, struct epoll_event *ev, int n,
-		int timeout, const sigset_t *sigmask, int *raised);
 [[gnu::weak]] int sys_mount(const char *source, const char *target,
 		const char *fstype, unsigned long flags, const void *data);
 [[gnu::weak]] int sys_umount2(const char *target, int flags);
-[[gnu::weak]] int sys_eventfd_create(unsigned int initval, int flags, int *fd);
-[[gnu::weak]] int sys_timerfd_create(int clockid, int flags, int *fd);
-[[gnu::weak]] int sys_timerfd_settime(int fd, int flags,
-		const struct itimerspec *value, struct itimerspec *oldvalue);
-[[gnu::weak]] int sys_timerfd_gettime(int fd, struct itimerspec *its);
-[[gnu::weak]] int sys_signalfd_create(const sigset_t *, int flags, int *fd);
-[[gnu::weak]] int sys_reboot(int cmd);
 [[gnu::weak]] int sys_ptrace(long req, pid_t pid, void *addr, void *data, long *out);
 [[gnu::weak]] int sys_capget(cap_user_header_t hdrp, cap_user_data_t datap);
 [[gnu::weak]] int sys_capset(cap_user_header_t hdrp, const cap_user_data_t datap);

@@ -13,6 +13,9 @@
 #include <frg/small_vector.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/debug.hpp>
+#include <mlibc/stdlib.hpp>
+#include <mlibc/locale.hpp>
+#include <mlibc/strtofp.hpp>
 #include <mlibc/posix-sysdeps.hpp>
 #include <mlibc/rtld-config.hpp>
 
@@ -115,14 +118,12 @@ void srand48(long int seed) {
 	seed48(arr);
 }
 
-long jrand48(unsigned short [3]) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+long jrand48(unsigned short s[3]) {
+	return (int32_t) (eand48_step(s, seed_48 + 3) >> 16);
 }
 
 long int mrand48(void) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+	return jrand48(seed_48);
 }
 
 // Borrowed from musl
@@ -180,38 +181,13 @@ char *setstate(char *state) {
 
 
 int mkostemps(char *pattern, int suffixlen, int flags) {
-	auto n = strlen(pattern);
-	if(n < (6 + static_cast<size_t>(suffixlen))) {
-		errno = EINVAL;
+	int fd = 0;
+	if (int e = mlibc::mkostemps(pattern, suffixlen, flags, &fd); e) {
+		errno = e;
 		return -1;
 	}
 
-	flags &= ~O_WRONLY;
-
-	for(size_t i = 0; i < 6; i++) {
-		if(pattern[n - (6 + suffixlen) + i] == 'X')
-			continue;
-		errno = EINVAL;
-		return -1;
-	}
-
-	// TODO: Do an exponential search.
-	for(size_t i = 0; i < 999999; i++) {
-		char sfx = pattern[n - suffixlen];
-		__ensure(sprintf(pattern + (n - (6 + suffixlen)), "%06zu", i) == 6);
-		pattern[n - suffixlen] = sfx;
-
-		int fd;
-		if(int e = mlibc::sys_open(pattern, O_RDWR | O_CREAT | O_EXCL | flags, S_IRUSR | S_IWUSR, &fd); !e) {
-			return fd;
-		}else if(e != EEXIST) {
-			errno = e;
-			return -1;
-		}
-	}
-
-	errno = EEXIST;
-	return -1;
+	return fd;
 }
 
 int mkostemp(char *pattern, int flags) {
@@ -522,29 +498,70 @@ int grantpt(int) {
 	return 0;
 }
 
-double strtod_l(const char *__restrict__ nptr, char ** __restrict__ endptr, locale_t) {
-	mlibc::infoLogger() << "mlibc: strtod_l ignores locale!" << frg::endlog;
-	return strtod(nptr, endptr);
+double strtod_l(const char *__restrict__ nptr, char ** __restrict__ endptr, locale_t loc) {
+	return mlibc::strtofp<double>(nptr, endptr, static_cast<mlibc::localeinfo *>(loc));
 }
 
-long double strtold_l(const char *__restrict__, char ** __restrict__, locale_t) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+long double strtold_l(const char *__restrict__ nptr, char ** __restrict__ endptr, locale_t loc) {
+	return mlibc::strtofp<long double>(nptr, endptr, static_cast<mlibc::localeinfo *>(loc));
 }
 
-float strtof_l(const char *__restrict__ nptr, char **__restrict__ endptr, locale_t) {
-	mlibc::infoLogger() << "mlibc: strtof_l ignores locales" << frg::endlog;
-	return strtof(nptr, endptr);
+float strtof_l(const char *__restrict__ nptr, char **__restrict__ endptr, locale_t loc) {
+	return mlibc::strtofp<float>(nptr, endptr, static_cast<mlibc::localeinfo *>(loc));
 }
 
-int strcoll_l(const char *, const char *, locale_t) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+int strcoll_l(const char *a, const char *b, locale_t) {
+	// TODO: strcoll_l should take "LC_COLLATE" into account.
+	return strcmp(a, b);
 }
 
-int getsubopt(char **__restrict__, char *const *__restrict__, char **__restrict__) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+int getsubopt(char **__restrict__ optionp, char *const *__restrict__ keylistp, char **__restrict__ valuep) {
+	*valuep = nullptr;
+
+	if (!optionp || !*optionp)
+		return -1;
+
+	char *s = *optionp;
+
+	// We diverge from glibc here as POSIX specifies that options should be tokens or tokens with
+	// values between commas; this implies that the empty string between two commas is not a token,
+	// and ignoring whitespace is sane behavior here. This seems to be in line with *BSD behavior.
+	for(; *s && (*s == ',' || *s == ' ' || *s == '\t'); s++);
+
+	if (!*s) {
+		*optionp = s;
+		return -1;
+	}
+
+	char *subopt = s;
+
+	for(; *++s && *s != ',' && *s != '=';);
+
+	if (*s) {
+		// If there's an equals sign, set the value pointer, and skip over the value part of the token.
+		// Terminate the token.
+
+		if (*s == '=') {
+			*s = '\0';
+			for (*valuep = ++s; *s && *s != ','; s++);
+
+			if (*s)
+				*s++ = '\0';
+		} else {
+			*s++ = '\0';
+		}
+
+		for (; *s && (*s == ',' || *s == ' ' || *s == '\t'); s++);
+	}
+
+	*optionp = s;
+
+	for (int cnt = 0; *keylistp; keylistp++, cnt++) {
+		if (!strcmp(subopt, *keylistp))
+			return cnt;
+	}
+
+	return -1;
 }
 
 char *secure_getenv(const char *name) {

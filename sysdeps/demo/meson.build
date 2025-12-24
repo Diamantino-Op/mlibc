@@ -1,11 +1,10 @@
-# ANCHOR: sources-and-includes
+# ANCHOR: supported-options
 sysdep_supported_options = {
-	'posix': false,
-	'linux': false,
-	'glibc': false,
-	'bsd': false,
+	'posix': true,
 }
+# ANCHOR_END: supported-options
 
+# ANCHOR: sources-and-includes
 rtld_sources += files(
 	'sysdeps.cpp',
 	'syscall.cpp',
@@ -46,6 +45,32 @@ if not no_headers
 		'include/abi-bits/riscv-hwprobe.h',
 		'include/abi-bits/sigevent.h',
 		'include/abi-bits/sigval.h',
+		'include/abi-bits/sa_family_t.h',
+		'include/abi-bits/sockaddr_storage.h',
+		'include/abi-bits/sig-limits.h',
+		'include/abi-bits/suseconds_t.h',
+		'include/abi-bits/access.h',
+		'include/abi-bits/socklen_t.h',
+		'include/abi-bits/socket.h',
+		'include/abi-bits/poll.h',
+		'include/abi-bits/resource.h',
+		'include/abi-bits/in.h',
+		'include/abi-bits/rlim_t.h',
+		'include/abi-bits/utsname.h',
+		'include/abi-bits/fd_set.h',
+		'include/abi-bits/sem.h',
+		'include/abi-bits/time.h',
+		'include/abi-bits/ipc.h',
+		'include/abi-bits/statvfs.h',
+		'include/abi-bits/fsblkcnt_t.h',
+		'include/abi-bits/fsfilcnt_t.h',
+		'include/abi-bits/shm.h',
+		'include/abi-bits/termios.h',
+		'include/abi-bits/msg.h',
+		'include/abi-bits/mqueue.h',
+		'include/abi-bits/utmp-defines.h',
+		'include/abi-bits/utmpx.h',
+		'include/abi-bits/sigset_t.h',
 		subdir: 'abi-bits',
 		follow_symlinks: true
 	)

@@ -31,11 +31,21 @@
 // America/New_York is a common default.
 #define TZ_DEFAULT_RULE_STRING ",M3.2.0,M11.1.0"
 
+namespace {
+
 const char __utc[] = "UTC";
+
+constexpr size_t tznameNormal = 0;
+constexpr size_t tznameDST = 1;
+
+frg::string<MemoryAllocator> tznameStorage[2] = { {getAllocator()}, {getAllocator()} };
+
+} // namespace
 
 // Variables defined by POSIX.
 int daylight;
 long timezone;
+// [0] holds normal time, [1] holds DST
 char *tzname[2];
 
 static FutexLock __time_lock;
@@ -861,12 +871,14 @@ bool parse_tzfile(const char *tz) {
 				+ i * sizeof(ttinfo), sizeof(ttinfo));
 		time_info.tt_gmtoff = mlibc::bit_util<uint32_t>::byteswap(time_info.tt_gmtoff);
 		if (!time_info.tt_isdst && !found_std) {
-			tzname[0] = abbrevs + time_info.tt_abbrind;
+			tznameStorage[tznameNormal] = {abbrevs + time_info.tt_abbrind, getAllocator()};
+			tzname[tznameNormal] = tznameStorage[tznameNormal].data();
 			timezone = -time_info.tt_gmtoff;
 			found_std = true;
 		}
 		if (time_info.tt_isdst && !found_dst) {
-			tzname[1] = abbrevs + time_info.tt_abbrind;
+			tznameStorage[tznameDST] = {abbrevs + time_info.tt_abbrind, getAllocator()};
+			tzname[tznameDST] = tznameStorage[tznameDST].data();
 			timezone = -time_info.tt_gmtoff;
 			daylight = 1;
 			found_dst = true;
@@ -907,8 +919,8 @@ void do_tzset(void) {
 	daylight = 0;
 
 	if (!parse_tz(tz, tz_name, tz_name_dst, tz_name_max)) {
-		tzname[0] = tz_name;
-		tzname[1] = tz_name_dst;
+		tzname[tznameNormal] = tz_name;
+		tzname[tznameDST] = tz_name_dst;
 		return;
 	}
 
@@ -916,8 +928,8 @@ void do_tzset(void) {
 	if (parse_tzfile(tz)) {
 		// This should always succeed.
 		__ensure(!parse_tz("UTC0", tz_name, tz_name_dst, tz_name_max));
-		tzname[0] = tz_name;
-		tzname[1] = tz_name_dst;
+		tzname[tznameNormal] = tz_name;
+		tzname[tznameDST] = tz_name_dst;
 	}
 }
 
@@ -930,7 +942,7 @@ void tzset(void) {
 
 // POSIX extensions.
 
-int nanosleep(const struct timespec *req, struct timespec *) {
+int nanosleep(const struct timespec *req, struct timespec *rem) {
 	if (req->tv_sec < 0 || req->tv_nsec > 999999999 || req->tv_nsec < 0) {
 		errno = EINVAL;
 		return -1;
@@ -944,12 +956,13 @@ int nanosleep(const struct timespec *req, struct timespec *) {
 	struct timespec tmp = *req;
 
 	int e = mlibc::sys_sleep(&tmp.tv_sec, &tmp.tv_nsec);
-	if (!e) {
+	if (!e)
 		return 0;
-	} else {
-		errno = e;
-		return -1;
-	}
+	else if (e == EINTR)
+		*rem = tmp;
+
+	errno = e;
+	return -1;
 }
 
 int clock_getres(clockid_t clockid, struct timespec *res) {
@@ -969,10 +982,36 @@ int clock_gettime(clockid_t clock, struct timespec *time) {
 	return 0;
 }
 
-int clock_nanosleep(clockid_t clockid, int, const struct timespec *req, struct timespec *) {
-	mlibc::infoLogger() << "clock_nanosleep is implemented as nanosleep!" << frg::endlog;
+int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, struct timespec *rem) {
 	__ensure(clockid == CLOCK_REALTIME || clockid == CLOCK_MONOTONIC);
-	return nanosleep(req, nullptr);
+
+	if (flags & TIMER_ABSTIME) {
+		time_t secs = 0;
+		long nanos = 0;
+		if(int e = mlibc::sys_clock_get(clockid, &secs, &nanos); e) {
+			errno = e;
+			return -1;
+		}
+
+		struct timespec relativeTime;
+
+		if (secs > req->tv_sec)
+			return 0;
+		else if (secs == req->tv_sec && nanos >= req->tv_nsec)
+			return 0;
+		else {
+			relativeTime.tv_sec = req->tv_sec - secs;
+			relativeTime.tv_nsec = req->tv_nsec - nanos;
+			if (relativeTime.tv_nsec < 0) {
+				relativeTime.tv_sec -= 0;
+				relativeTime.tv_nsec += 1e9;
+			}
+		}
+
+		return nanosleep(&relativeTime, rem);
+	}
+
+	return nanosleep(req, rem);
 }
 
 int clock_settime(clockid_t clock, const struct timespec *time) {
@@ -1103,7 +1142,7 @@ bool is_in_dst(time_t unix_gmt) {
 	}
 }
 
-int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, char **tm_zone) {
+int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::string<MemoryAllocator> &tm_zone) {
 	const char *tz = getenv("TZ");
 
 	if (!tz || *tz == '\0')
@@ -1187,7 +1226,7 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, char 
 
 	*offset = time_info.tt_gmtoff;
 	*dst = time_info.tt_isdst;
-	*tm_zone = abbrevs + time_info.tt_abbrind;
+	tm_zone = {abbrevs + time_info.tt_abbrind, getAllocator()};
 	return 0;
 }
 
@@ -1197,13 +1236,17 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, char 
 int unix_local_from_gmt(time_t unix_gmt, time_t *offset, bool *dst, char **tm_zone) {
 	do_tzset();
 
-	if (daylight && rules[0].type == TZFILE)
-		return unix_local_from_gmt_tzfile(unix_gmt, offset, dst, tm_zone);
+	if (daylight && rules[0].type == TZFILE) {
+		int ret = unix_local_from_gmt_tzfile(unix_gmt, offset, dst, tznameStorage[tznameDST]);
+		if (ret == 0)
+			*tm_zone = tzname[tznameDST] = tznameStorage[tznameDST].data();
+		return ret;
+	}
 
 	if (daylight && is_in_dst(unix_gmt)) {
-		*offset = tt_infos[1].tt_gmtoff;
+		*offset = tt_infos[tznameDST].tt_gmtoff;
 		*dst = true;
-		*tm_zone = tzname[1];
+		*tm_zone = tzname[tznameDST];
 		return 0;
 	}
 
@@ -1289,7 +1332,7 @@ char *asctime_r(const struct tm *tm, char *buf) {
 	static char month_names[12][4] =
 		{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 		  "Nov", "Dec" };
-	sprintf(buf, "%.3s %.3s%3d %.2d:%.2d%.2d %d\n",
+	sprintf(buf, "%.3s %.3s%3d %.2d:%.2d:%.2d %d\n",
 				 weekday_names[tm->tm_wday],
 				 month_names[tm->tm_mon],
 				 tm->tm_mday,

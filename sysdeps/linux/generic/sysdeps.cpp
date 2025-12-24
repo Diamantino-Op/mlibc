@@ -390,14 +390,6 @@ int sys_socket(int domain, int type, int protocol, int *fd) {
         return 0;
 }
 
-int sys_msg_send(int sockfd, const struct msghdr *msg, int flags, ssize_t *length) {
-        auto ret = do_cp_syscall(SYS_sendmsg, sockfd, msg, flags);
-        if (int e = sc_error(ret); e)
-                return e;
-        *length = sc_int_result<ssize_t>(ret);
-        return 0;
-}
-
 ssize_t sys_sendto(int fd, const void *buffer, size_t size, int flags, const struct sockaddr *sock_addr, socklen_t addr_length, ssize_t *length) {
 	auto ret = do_cp_syscall(SYS_sendto, fd, buffer, size, flags, sock_addr, addr_length);
 	if(int e = sc_error(ret); e) {
@@ -414,14 +406,6 @@ ssize_t sys_recvfrom(int fd, void *buffer, size_t size, int flags, struct sockad
 	}
 	*length = sc_int_result<ssize_t>(ret);
 	return 0;
-}
-
-int sys_msg_recv(int sockfd, struct msghdr *msg, int flags, ssize_t *length) {
-        auto ret = do_cp_syscall(SYS_recvmsg, sockfd, msg, flags);
-        if (int e = sc_error(ret); e)
-                return e;
-        *length = sc_int_result<ssize_t>(ret);
-        return 0;
 }
 
 int sys_fcntl(int fd, int cmd, va_list args, int *result) {
@@ -453,6 +437,8 @@ int sys_unlinkat(int dfd, const char *path, int flags) {
 }
 
 int sys_sleep(time_t *secs, long *nanos) {
+	__ensure(*nanos < 1'000'000'000);
+
 	struct timespec req = {
 		.tv_sec = *secs,
 		.tv_nsec = *nanos
@@ -485,6 +471,7 @@ int sys_isatty(int fd) {
 #include <sys/ipc.h>
 #include <sys/user.h>
 #include <sys/utsname.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
@@ -493,6 +480,41 @@ int sys_isatty(int fd) {
 #include <sched.h>
 #include <fcntl.h>
 #include <pthread.h>
+
+int sys_msg_send(int sockfd, const struct msghdr *msg, int flags, ssize_t *length) {
+	// Work around ABI mismatches: POSIX requires us to expose some members of a particular type,
+	// and Linux kernel ABI is using larger types. Our fix is to add padding members to preserve
+	// struct layout and zero them out here.
+#if __INTPTR_WIDTH__ == 64
+	const_cast<msghdr *>(msg)->__pad0 = 0;
+	const_cast<msghdr *>(msg)->__pad1 = 0;
+
+	for (auto cmsg = CMSG_FIRSTHDR(msg); cmsg; cmsg = CMSG_NXTHDR(msg, cmsg))
+		cmsg->__pad = 0;
+#endif /* __INTPTR_WIDTH__ == 64 */
+
+	auto ret = do_cp_syscall(SYS_sendmsg, sockfd, msg, flags);
+	if (int e = sc_error(ret); e)
+		return e;
+	*length = sc_int_result<ssize_t>(ret);
+	return 0;
+}
+
+int sys_msg_recv(int sockfd, struct msghdr *msg, int flags, ssize_t *length) {
+	// Work around ABI mismatches: POSIX requires us to expose some members of a particular type,
+	// and Linux kernel ABI is using larger types. Our fix is to add padding members to preserve
+	// struct layout and zero them out here.
+#if __INTPTR_WIDTH__ == 64
+	const_cast<msghdr *>(msg)->__pad0 = 0;
+	const_cast<msghdr *>(msg)->__pad1 = 0;
+#endif /* __INTPTR_WIDTH__ == 64 */
+
+	auto ret = do_cp_syscall(SYS_recvmsg, sockfd, msg, flags);
+	if (int e = sc_error(ret); e)
+			return e;
+	*length = sc_int_result<ssize_t>(ret);
+	return 0;
+}
 
 int sys_ioctl(int fd, unsigned long request, void *arg, int *result) {
 	auto ret = do_syscall(SYS_ioctl, fd, request, arg);
@@ -733,6 +755,13 @@ int sys_tcsetattr(int fd, int optional_action, const struct termios *attr) {
 	return 0;
 }
 
+int sys_tcsendbreak(int fd, int) {
+	auto ret = do_syscall(SYS_ioctl, fd, TCSBRK, 0);
+	if (int e = sc_error(ret); e)
+		return e;
+	return 0;
+}
+
 int sys_tcflush(int fd, int queue) {
 	auto ret = do_syscall(SYS_ioctl, fd, TCFLSH, queue);
 	if (int e = sc_error(ret); e)
@@ -820,6 +849,13 @@ int sys_shutdown(int sockfd, int how) {
 	if (int e = sc_error(ret); e) {
 		return e;
 	}
+	return 0;
+}
+
+int sys_sockatmark(int sockfd, int *out) {
+	auto ret = do_syscall(SYS_ioctl, sockfd, SIOCATMARK, out);
+	if (int e = sc_error(ret); e)
+		return e;
 	return 0;
 }
 
@@ -1048,6 +1084,15 @@ int sys_timer_delete(timer_t t) {
 	if (int e = sc_error(ret); e) {
 		return e;
 	}
+	return 0;
+}
+
+int sys_timer_getoverrun(timer_t t, int *out) {
+	auto ret = do_syscall(SYS_timer_getoverrun, t);
+	if (int e = sc_error(ret); e)
+		return e;
+
+	*out = sc_int_result<int>(ret);
 	return 0;
 }
 
@@ -2482,6 +2527,21 @@ int sys_shmget(int *shm_id, key_t key, size_t size, int shmflg) {
 	if (int e = sc_error(ret); e)
 		return e;
 	*shm_id = sc_int_result<int>(ret);
+	return 0;
+}
+
+int sys_sigqueue(pid_t pid, int sig, const union sigval val) {
+	siginfo_t si;
+	memset(&si, 0, sizeof(si));
+	si.si_signo = sig;
+	si.si_code = SI_QUEUE;
+	si.si_value = val;
+	si.si_uid = mlibc::sys_getuid();
+	si.si_pid = mlibc::sys_getpid();
+
+	auto ret = do_syscall(SYS_rt_sigqueueinfo, pid, sig, &si);
+	if (int e = sc_error(ret); e)
+		return e;
 	return 0;
 }
 
