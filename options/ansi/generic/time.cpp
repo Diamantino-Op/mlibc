@@ -17,12 +17,13 @@
 #include <bits/ensure.h>
 #include <mlibc/debug.hpp>
 #include <mlibc/file-window.hpp>
-#include <mlibc/ansi-sysdeps.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/lock.hpp>
 #include <mlibc/locale.hpp>
 #include <mlibc/bitutil.hpp>
 #include <mlibc/strings.hpp>
+#include <mlibc/time.hpp>
 
 #include <frg/mutex.hpp>
 
@@ -105,376 +106,22 @@ struct tm *localtime(const time_t *unix_gmt) {
 	return localtime_r(unix_gmt, &per_thread_tm);
 }
 
-size_t strftime(char *__restrict dest, size_t max_size,
-		const char *__restrict format, const struct tm *__restrict tm) {
-	auto c = format;
-	auto p = dest;
-	[[maybe_unused]] bool use_alternative_symbols = false;
-	[[maybe_unused]] bool use_alternative_era_format = false;
-
-	while(*c) {
-		int chunk;
-		auto space = (dest + max_size) - p;
-		__ensure(space >= 0);
-
-		if(*c != '%') {
-			if(!space)
-				return 0;
-			*p = *c;
-			c++;
-			p++;
-			continue;
-		}
-
-		if(*(c + 1) == 'O') {
-			std::array<char, 15> valid{{'B', 'b', 'd', 'e', 'H', 'I', 'm', 'M', 'S', 'u', 'U', 'V', 'w', 'W', 'y'}};
-			auto next = *(c + 2);
-			if(std::find(valid.begin(), valid.end(), next) != valid.end()) {
-				use_alternative_symbols = true;
-				c++;
-			} else {
-				*p = '%';
-				p++;
-				c++;
-				*p = 'O';
-				p++;
-				c++;
-				continue;
-			}
-		} else if(*(c + 1) == 'E') {
-			std::array<char, 6> valid{{'c', 'C', 'x', 'X', 'y', 'Y'}};
-			auto next = *(c + 2);
-			if(std::find(valid.begin(), valid.end(), next) != valid.end()) {
-				use_alternative_era_format = true;
-				c++;
-			} else {
-				*p = '%';
-				p++;
-				c++;
-				*p = 'E';
-				p++;
-				c++;
-				continue;
-			}
-		}
-
-		switch(*++c) {
-		case 'Y': {
-			chunk = snprintf(p, space, "%d", 1900 + tm->tm_year);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'm': {
-			chunk = snprintf(p, space, "%.2d", tm->tm_mon + 1);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'd': {
-			chunk = snprintf(p, space, "%.2d", tm->tm_mday);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'z': {
-			auto min = tm->tm_gmtoff / 60;
-			auto diff = ((min / 60) * 100) + (min % 60);
-			chunk = snprintf(p, space, "%c%04d", diff >= 0 ? '+' : '-', abs(diff));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'Z': {
-			chunk = snprintf(p, space, "%s", "UTC");
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'H': {
-			chunk = snprintf(p, space, "%.2i", tm->tm_hour);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'M': {
-			chunk = snprintf(p, space, "%.2i", tm->tm_min);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'S': {
-			chunk = snprintf(p, space, "%.2d", tm->tm_sec);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'R': {
-			chunk = snprintf(p, space, "%.2i:%.2i", tm->tm_hour, tm->tm_min);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'T': {
-			chunk = snprintf(p, space, "%.2i:%.2i:%.2i", tm->tm_hour, tm->tm_min, tm->tm_sec);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'F': {
-			chunk = snprintf(p, space, "%d-%.2d-%.2d", 1900 + tm->tm_year, tm->tm_mon + 1,
-					tm->tm_mday);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'D': {
-			chunk = snprintf(p, space, "%.2d/%.2d/%.2d", tm->tm_mon + 1, tm->tm_mday, (tm->tm_year + 1900) % 100);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'a': {
-			int day = tm->tm_wday;
-			if(day < 0 || day > 6)
-				__ensure(!"Day not in bounds.");
-
-			chunk = snprintf(p, space, "%s", mlibc::nl_langinfo(ABDAY_1 + day));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'b':
-		case 'B':
-		case 'h': {
-			int mon = tm->tm_mon;
-			if(mon < 0 || mon > 11)
-				__ensure(!"Month not in bounds.");
-
-			nl_item item = (*c == 'B') ? MON_1 : ABMON_1;
-
-			chunk = snprintf(p, space, "%s", mlibc::nl_langinfo(item + mon));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'c': {
-			int day = tm->tm_wday;
-			if(day < 0 || day > 6)
-				__ensure(!"Day not in bounds.");
-
-			int mon = tm->tm_mon;
-			if(mon < 0 || mon > 11)
-				__ensure(!"Month not in bounds.");
-
-			chunk = snprintf(p, space, "%s %s %2d %.2i:%.2i:%.2d %d", mlibc::nl_langinfo(ABDAY_1 + day),
-					mlibc::nl_langinfo(ABMON_1 + mon), tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, 1900 + tm->tm_year);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'e': {
-			chunk = snprintf(p, space, "%2d", tm->tm_mday);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'l': {
-			int hour = tm->tm_hour;
-			if(!hour)
-				hour = 12;
-			if(hour > 12)
-				hour -= 12;
-			chunk = snprintf(p, space, "%2d", hour);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'k': {
-			chunk = snprintf(p, space, "%2d", tm->tm_hour);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'I': {
-			int hour = tm->tm_hour;
-			if(!hour)
-				hour = 12;
-			if(hour > 12)
-				hour -= 12;
-			chunk = snprintf(p, space, "%.2d", hour);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'p': {
-			chunk = snprintf(p, space, "%s", mlibc::nl_langinfo((tm->tm_hour < 12) ? AM_STR : PM_STR));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'P': {
-			char *str = mlibc::nl_langinfo((tm->tm_hour < 12) ? AM_STR : PM_STR);
-			char *str_lower = reinterpret_cast<char *>(getAllocator().allocate(strlen(str) + 1));
-			for(size_t i = 0; str[i]; i++)
-				str_lower[i] = tolower(str[i]);
-			str_lower[strlen(str)] = '\0';
-
-			chunk = snprintf(p, space, "%s", str_lower);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'C': {
-			chunk = snprintf(p, space, "%.2d", (1900 + tm->tm_year) / 100);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'y': {
-			chunk = snprintf(p, space, "%.2d", (1900 + tm->tm_year) % 100);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'j': {
-			chunk = snprintf(p, space, "%.3d", tm->tm_yday + 1);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'A': {
-			chunk = snprintf(p, space, "%s", mlibc::nl_langinfo(DAY_1 + tm->tm_wday));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'r': {
-			int hour = tm->tm_hour;
-			if(!hour)
-				hour = 12;
-			if(hour > 12)
-				hour -= 12;
-			chunk = snprintf(p, space, "%.2i:%.2i:%.2i %s", hour, tm->tm_min, tm->tm_sec,
-				mlibc::nl_langinfo((tm->tm_hour < 12) ? AM_STR : PM_STR));
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case '%': {
-			chunk = snprintf(p, space, "%%");
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'n': {
-			chunk = snprintf(p, space, "\n");
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 't': {
-			chunk = snprintf(p, space, "\t");
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case 'x': {
-			return strftime(dest, max_size, mlibc::nl_langinfo(D_FMT), tm);
-		}
-		case 'X': {
-			return strftime(dest, max_size, mlibc::nl_langinfo(T_FMT), tm);
-		}
-		case 'U': {
-			chunk = snprintf(p, space, "%02d", (tm->tm_yday + 7 - tm->tm_wday) / 7);
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			c++;
-			break;
-		}
-		case '\0': {
-			chunk = snprintf(p, space, "%%");
-			if(chunk >= space)
-				return 0;
-			p += chunk;
-			break;
-		}
-		default:
-			mlibc::panicLogger() << "mlibc: strftime unknown format type: " << c << frg::endlog;
-		}
-	}
-
-	auto space = (dest + max_size) - p;
-	if(!space)
-		return 0;
-
-	*p = '\0';
-	return (p - dest);
+size_t strftime(
+    char *__restrict dest,
+    size_t max_size,
+    const char *__restrict format,
+    const struct tm *__restrict tm
+) {
+	return mlibc::strftime(dest, max_size, format, tm, mlibc::getActiveLocale());
 }
 
-size_t wcsftime(wchar_t *__restrict, size_t, const wchar_t *__restrict,
-		const struct tm *__restrict) {
-	mlibc::infoLogger() << "mlibc: wcsftime is a stub" << frg::endlog;
-	return 0;
+size_t wcsftime(
+    wchar_t *__restrict dest,
+    size_t max_size,
+    const wchar_t *__restrict format,
+    const struct tm *__restrict tm
+) {
+	return mlibc::strftime(dest, max_size, format, tm, mlibc::getActiveLocale());
 }
 
 namespace {
@@ -819,12 +466,12 @@ bool parse_tzfile(const char *tz) {
 	frg::string<MemoryAllocator> path = parse_tzfile_path(tz);
 
 	// Check if file exists, otherwise fallback to the default.
-	if (!mlibc::sys_stat) {
+	if constexpr (!mlibc::IsImplemented<Stat>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"cannot proceed without sys_stat");
 	}
 	struct stat info;
-	if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
+	if (mlibc::sysdep_or_panic<Stat>(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
 		return true;
 
 	// FIXME: Make this fallible so the above check is not needed.
@@ -833,12 +480,12 @@ bool parse_tzfile(const char *tz) {
 	// TODO(geert): we can probably cache this somehow
 	tzfile tzfile_time;
 	memcpy(&tzfile_time, reinterpret_cast<char *>(window.get()), sizeof(tzfile));
-	tzfile_time.tzh_ttisgmtcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_ttisgmtcnt);
-	tzfile_time.tzh_ttisstdcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_ttisstdcnt);
-	tzfile_time.tzh_leapcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_leapcnt);
-	tzfile_time.tzh_timecnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_timecnt);
-	tzfile_time.tzh_typecnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_typecnt);
-	tzfile_time.tzh_charcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_charcnt);
+	tzfile_time.tzh_ttisgmtcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_ttisgmtcnt);
+	tzfile_time.tzh_ttisstdcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_ttisstdcnt);
+	tzfile_time.tzh_leapcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_leapcnt);
+	tzfile_time.tzh_timecnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_timecnt);
+	tzfile_time.tzh_typecnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_typecnt);
+	tzfile_time.tzh_charcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_charcnt);
 
 	if (tzfile_time.magic[0] != 'T' || tzfile_time.magic[1] != 'Z' || tzfile_time.magic[2] != 'i'
 			|| tzfile_time.magic[3] != 'f') {
@@ -869,7 +516,7 @@ bool parse_tzfile(const char *tz) {
 				+ tzfile_time.tzh_timecnt * sizeof(int32_t)
 				+ tzfile_time.tzh_timecnt * sizeof(uint8_t)
 				+ i * sizeof(ttinfo), sizeof(ttinfo));
-		time_info.tt_gmtoff = mlibc::bit_util<uint32_t>::byteswap(time_info.tt_gmtoff);
+		time_info.tt_gmtoff = mlibc::bit_util<uint32_t>::be_to_host(time_info.tt_gmtoff);
 		if (!time_info.tt_isdst && !found_std) {
 			tznameStorage[tznameNormal] = {abbrevs + time_info.tt_abbrind, getAllocator()};
 			tzname[tznameNormal] = tznameStorage[tznameNormal].data();
@@ -948,17 +595,17 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
 		return -1;
 	}
 
-	if(!mlibc::sys_sleep) {
+	if constexpr (!mlibc::IsImplemented<Sleep>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"Cannot continue without sys_sleep()");
 	}
 
 	struct timespec tmp = *req;
 
-	int e = mlibc::sys_sleep(&tmp.tv_sec, &tmp.tv_nsec);
+	int e = mlibc::sysdep_or_panic<Sleep>(&tmp.tv_sec, &tmp.tv_nsec);
 	if (!e)
 		return 0;
-	else if (e == EINTR)
+	else if (e == EINTR && rem)
 		*rem = tmp;
 
 	errno = e;
@@ -966,8 +613,7 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
 }
 
 int clock_getres(clockid_t clockid, struct timespec *res) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_clock_getres, -1);
-	if(int e = mlibc::sys_clock_getres(clockid, &res->tv_sec, &res->tv_nsec); e) {
+	if(int e = mlibc::sysdep_or_enosys<ClockGetres>(clockid, &res->tv_sec, &res->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -975,7 +621,7 @@ int clock_getres(clockid_t clockid, struct timespec *res) {
 }
 
 int clock_gettime(clockid_t clock, struct timespec *time) {
-	if(int e = mlibc::sys_clock_get(clock, &time->tv_sec, &time->tv_nsec); e) {
+	if(int e = mlibc::sysdep<ClockGet>(clock, &time->tv_sec, &time->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -988,7 +634,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 	if (flags & TIMER_ABSTIME) {
 		time_t secs = 0;
 		long nanos = 0;
-		if(int e = mlibc::sys_clock_get(clockid, &secs, &nanos); e) {
+		if(int e = mlibc::sysdep<ClockGet>(clockid, &secs, &nanos); e) {
 			errno = e;
 			return -1;
 		}
@@ -1003,7 +649,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 			relativeTime.tv_sec = req->tv_sec - secs;
 			relativeTime.tv_nsec = req->tv_nsec - nanos;
 			if (relativeTime.tv_nsec < 0) {
-				relativeTime.tv_sec -= 0;
+				relativeTime.tv_sec -= 1;
 				relativeTime.tv_nsec += 1e9;
 			}
 		}
@@ -1015,8 +661,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 }
 
 int clock_settime(clockid_t clock, const struct timespec *time) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_clock_set, -1);
-	if(int e = mlibc::sys_clock_set(clock, time->tv_sec, time->tv_nsec); e) {
+	if(int e = mlibc::sysdep_or_enosys<ClockSet>(clock, time->tv_sec, time->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -1026,7 +671,7 @@ int clock_settime(clockid_t clock, const struct timespec *time) {
 time_t time(time_t *out) {
 	time_t secs;
 	long nanos;
-	if(int e = mlibc::sys_clock_get(CLOCK_REALTIME, &secs, &nanos); e) {
+	if(int e = mlibc::sysdep<ClockGet>(CLOCK_REALTIME, &secs, &nanos); e) {
 		errno = e;
 		return (time_t)-1;
 	}
@@ -1151,12 +796,12 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::
 	frg::string<MemoryAllocator> path = parse_tzfile_path(tz);
 
 	// Check if file exists
-	if (!mlibc::sys_stat) {
+	if constexpr (!mlibc::IsImplemented<Stat>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"cannot proceed without sys_stat");
 	}
 	struct stat info;
-	if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
+	if (mlibc::sysdep_or_panic<Stat>(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
 		return -1;
 
 	// FIXME: Make this fallible so the above check is not needed.
@@ -1165,12 +810,12 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::
 	// TODO(geert): we can probably cache this somehow
 	tzfile tzfile_time;
 	memcpy(&tzfile_time, reinterpret_cast<char *>(window.get()), sizeof(tzfile));
-	tzfile_time.tzh_ttisgmtcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_ttisgmtcnt);
-	tzfile_time.tzh_ttisstdcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_ttisstdcnt);
-	tzfile_time.tzh_leapcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_leapcnt);
-	tzfile_time.tzh_timecnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_timecnt);
-	tzfile_time.tzh_typecnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_typecnt);
-	tzfile_time.tzh_charcnt = mlibc::bit_util<uint32_t>::byteswap(tzfile_time.tzh_charcnt);
+	tzfile_time.tzh_ttisgmtcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_ttisgmtcnt);
+	tzfile_time.tzh_ttisstdcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_ttisstdcnt);
+	tzfile_time.tzh_leapcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_leapcnt);
+	tzfile_time.tzh_timecnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_timecnt);
+	tzfile_time.tzh_typecnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_typecnt);
+	tzfile_time.tzh_charcnt = mlibc::bit_util<uint32_t>::be_to_host(tzfile_time.tzh_charcnt);
 
 	if (tzfile_time.magic[0] != 'T' || tzfile_time.magic[1] != 'Z' || tzfile_time.magic[2] != 'i'
 			|| tzfile_time.magic[3] != 'f') {
@@ -1189,7 +834,7 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::
 		int32_t ttime;
 		memcpy(&ttime, reinterpret_cast<char *>(window.get()) + sizeof(tzfile)
 				+ i * sizeof(int32_t), sizeof(int32_t));
-		ttime = mlibc::bit_util<uint32_t>::byteswap(ttime);
+		ttime = mlibc::bit_util<uint32_t>::be_to_host(ttime);
 		// If we are before the first transition, the format dicates that
 		// the first ttinfo entry should be used (and not the ttinfo entry pointed
 		// to by the first transition time).
@@ -1217,7 +862,7 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::
 			+ tzfile_time.tzh_timecnt * sizeof(int32_t)
 			+ tzfile_time.tzh_timecnt * sizeof(uint8_t)
 			+ ttinfo_index * sizeof(ttinfo), sizeof(ttinfo));
-	time_info.tt_gmtoff = mlibc::bit_util<uint32_t>::byteswap(time_info.tt_gmtoff);
+	time_info.tt_gmtoff = mlibc::bit_util<uint32_t>::be_to_host(time_info.tt_gmtoff);
 
 	char *abbrevs = reinterpret_cast<char *>(window.get()) + sizeof(tzfile)
 		+ tzfile_time.tzh_timecnt * sizeof(int32_t)

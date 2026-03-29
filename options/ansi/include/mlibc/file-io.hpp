@@ -1,6 +1,7 @@
 #ifndef MLIBC_FILE_IO_HPP
 #define MLIBC_FILE_IO_HPP
 
+#include <bits/mbstate.h>
 #include <stdio.h>
 
 #include <mlibc/lock.hpp>
@@ -21,6 +22,13 @@ enum class buffer_mode {
 	line_buffer,
 	full_buffer
 };
+
+enum class stream_orientation : int {
+	byte = -1,
+	none = 0,
+	wide = 1,
+};
+
 struct StdioLock {
 	bool uselock = true;
 	RecursiveFutexLock futexlock;
@@ -68,12 +76,18 @@ public:
 	int tell(off_t *current_offset);
 	int seek(off_t offset, int whence);
 
+	// Checks if the current stream orientation is compatible with the passed-in stream orientation
+	// If the stream has no associated stream orientation yet, it is set.
+	// If the stream orientation is not permitted, the function returns false, otherwise true.
+	bool check_orientation(stream_orientation orientation);
+
 protected:
 	virtual int determine_type(stream_type *type) = 0;
 	virtual int determine_bufmode(buffer_mode *mode) = 0;
 	virtual int io_read(char *buffer, size_t max_size, size_t *actual_size) = 0;
 	virtual int io_write(const char *buffer, size_t max_size, size_t *actual_size) = 0;
 	virtual int io_seek(off_t offset, int whence, off_t *new_offset) = 0;
+	virtual int post_flush();
 
 	int _reset();
 private:
@@ -90,10 +104,17 @@ private:
 	void (*_do_dispose)(abstract_file *);
 
 public:
+	buffer_mode bufmode() const {
+		return _bufmode;
+	}
+
 	// lock for file operations
 	StdioLock _lock;
 	// All files are stored in a global linked list, so that they can be flushed at exit().
 	frg::default_list_hook<abstract_file> _list_hook;
+
+	stream_orientation _orientation = stream_orientation::none;
+	mbstate_t _mbstate = {};
 };
 
 struct fd_file : abstract_file {

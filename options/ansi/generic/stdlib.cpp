@@ -15,13 +15,14 @@
 #include <bits/ensure.h>
 #include <bits/sigset_t.h>
 
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/charcode.hpp>
-#include <mlibc/ansi-sysdeps.hpp>
 #include <mlibc/strtofp.hpp>
 #include <mlibc/strtol.hpp>
 #include <mlibc/threads.hpp>
 #include <mlibc/global-config.hpp>
+#include <mlibc/exit.hpp>
 
 #if __MLIBC_POSIX_OPTION
 #include <pthread.h>
@@ -164,24 +165,22 @@ void abort(void) {
 	sigset_t set;
 	sigemptyset(&set);
 	sigaddset(&set, SIGABRT);
-	if (mlibc::sys_sigprocmask) {
-		mlibc::sys_sigprocmask(SIG_UNBLOCK, &set, nullptr);
-	}
+	if constexpr (mlibc::IsImplemented<Sigprocmask>)
+		mlibc::sysdep_or_panic<Sigprocmask>(SIG_UNBLOCK, &set, nullptr);
 
 	raise(SIGABRT);
 
 	sigfillset(&set);
 	sigdelset(&set, SIGABRT);
-	if (mlibc::sys_sigprocmask) {
-		mlibc::sys_sigprocmask(SIG_SETMASK, &set, nullptr);
-	}
+	if constexpr (mlibc::IsImplemented<Sigprocmask>)
+		mlibc::sysdep_or_panic<Sigprocmask>(SIG_SETMASK, &set, nullptr);
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 
-	if (mlibc::sys_sigaction(SIGABRT, &sa, nullptr))
+	if (mlibc::sysdep_or_enosys<Sigaction>(SIGABRT, &sa, nullptr))
 		mlibc::panicLogger() << "mlibc: sigaction failed in abort" << frg::endlog;
 
 	if (raise(SIGABRT))
@@ -218,12 +217,14 @@ void exit(int status) {
 	// see https://austingroupbugs.net/view.php?id=1845
 	mlibc::thread_mutex_lock(&exit_mutex);
 
+	mlibc::processIsExiting.store(true, std::memory_order_relaxed);
+
 	__mlibc_do_finalize();
-	mlibc::sys_exit(status);
+	mlibc::sysdep<Exit>(status);
 }
 
 void _Exit(int status) {
-	mlibc::sys_exit(status);
+	mlibc::sysdep<Exit>(status);
 }
 
 // getenv() is provided by POSIX
@@ -235,7 +236,7 @@ void quick_exit(int status) {
 		func();
 	}
 
-	mlibc::sys_exit(status);
+	mlibc::sysdep<Exit>(status);
 }
 
 extern char **environ;
@@ -244,12 +245,8 @@ int system(const char *command) {
 	int status = -1;
 	pid_t child;
 
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_fork && mlibc::sys_waitpid &&
-			mlibc::sys_execve && mlibc::sys_sigprocmask && mlibc::sys_sigaction, -1);
-
-#if __MLIBC_POSIX_OPTION
-	pthread_testcancel();
-#endif // __MLIBC_POSIX_OPTION
+	MLIBC_CHECK_OR_ENOSYS(mlibc::IsImplemented<Fork> && mlibc::IsImplemented<Waitpid> &&
+			mlibc::IsImplemented<Execve> && mlibc::IsImplemented<Sigprocmask> && mlibc::IsImplemented<Sigaction>, -1);
 
 	if (!command) {
 		return 1;
@@ -261,31 +258,35 @@ int system(const char *command) {
 	new_sa.sa_handler = SIG_IGN;
 	new_sa.sa_flags = 0;
 	sigemptyset(&new_sa.sa_mask);
-	mlibc::sys_sigaction(SIGINT, &new_sa, &old_int);
-	mlibc::sys_sigaction(SIGQUIT, &new_sa, &old_quit);
+	mlibc::sysdep_or_panic<Sigaction>(SIGINT, &new_sa, &old_int);
+	mlibc::sysdep_or_panic<Sigaction>(SIGQUIT, &new_sa, &old_quit);
 
 	sigemptyset(&new_mask);
 	sigaddset(&new_mask, SIGCHLD);
-	mlibc::sys_sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
+	mlibc::sysdep_or_panic<Sigprocmask>(SIG_BLOCK, &new_mask, &old_mask);
 
-	if (int e = mlibc::sys_fork(&child)) {
+	if (int e = mlibc::sysdep_or_panic<Fork>(&child)) {
 		errno = e;
 	} else if (!child) {
-		mlibc::sys_sigaction(SIGINT, &old_int, nullptr);
-		mlibc::sys_sigaction(SIGQUIT, &old_quit, nullptr);
-		mlibc::sys_sigprocmask(SIG_SETMASK, &old_mask, nullptr);
+		// update the cached TID in the TCB
+		auto self = mlibc::get_current_tcb();
+		__atomic_store_n(&self->tid, mlibc::refetch_tid(), __ATOMIC_RELAXED);
+
+		mlibc::sysdep_or_panic<Sigaction>(SIGINT, &old_int, nullptr);
+		mlibc::sysdep_or_panic<Sigaction>(SIGQUIT, &old_quit, nullptr);
+		mlibc::sysdep_or_panic<Sigprocmask>(SIG_SETMASK, &old_mask, nullptr);
 
 		const char *args[] = {
-			"sh", "-c", command, nullptr
+			"sh", "-c", "--", command, nullptr
 		};
 
-		mlibc::sys_execve("/bin/sh", const_cast<char **>(args), environ);
+		mlibc::sysdep_or_panic<Execve>("/bin/sh", const_cast<char **>(args), environ);
 		_Exit(127);
 	} else {
 		int err;
 		pid_t unused;
 
-		while ((err = mlibc::sys_waitpid(child, &status, 0, nullptr, &unused)) < 0) {
+		while ((err = mlibc::sysdep_or_panic<Waitpid>(child, &status, 0, nullptr, &unused)) < 0) {
 			if (err == EINTR)
 				continue;
 
@@ -294,9 +295,9 @@ int system(const char *command) {
 		}
 	}
 
-	mlibc::sys_sigaction(SIGINT, &old_int, nullptr);
-	mlibc::sys_sigaction(SIGQUIT, &old_quit, nullptr);
-	mlibc::sys_sigprocmask(SIG_SETMASK, &old_mask, nullptr);
+	mlibc::sysdep_or_panic<Sigaction>(SIGINT, &old_int, nullptr);
+	mlibc::sysdep_or_panic<Sigaction>(SIGQUIT, &old_quit, nullptr);
+	mlibc::sysdep_or_panic<Sigprocmask>(SIG_SETMASK, &old_mask, nullptr);
 
 	return status;
 }
@@ -407,9 +408,16 @@ int mblen(const char *mbs, size_t mb_limit) {
 		return cc->has_shift_states;
 	}
 
-	if(auto e = cc->decode_wtranscode(nseq, wseq, mblen_state); e != mlibc::charcode_error::null)
-		__ensure(!"decode_wtranscode() errors are not handled");
-	return nseq.it - mbs;
+	auto e = cc->decode_wtranscode(nseq, wseq, mblen_state);
+	if(e == mlibc::transcode_status::input_exhausted || e == mlibc::transcode_status::output_exhausted) {
+		return nseq.it - mbs;
+	} else if(e == mlibc::transcode_status::null_terminator) {
+		return 0;
+	} else {
+		__ensure(e == mlibc::transcode_status::illegal_input || e == mlibc::transcode_status::input_underflow);
+		errno = EILSEQ;
+		return -1;
+	}
 }
 
 int mbtowc(wchar_t *__restrict wc, const char *__restrict mb, size_t max_size) {
@@ -429,21 +437,18 @@ int mbtowc(wchar_t *__restrict wc, const char *__restrict mb, size_t max_size) {
 			auto e = cc->decode_wtranscode(nseq, wseq, mbtowc_state);
 			switch(e) {
 				// We keep the state, so we can simply return here.
-				case mlibc::charcode_error::input_underflow:
-				case mlibc::charcode_error::null: {
+				case mlibc::transcode_status::input_underflow:
+				case mlibc::transcode_status::input_exhausted:
+				case mlibc::transcode_status::output_exhausted:
+				case mlibc::transcode_status::null_terminator: {
 					return nseq.it - mb;
 				}
-				case mlibc::charcode_error::illegal_input: {
+				case mlibc::transcode_status::illegal_input: {
 					errno = -EILSEQ;
 					return -1;
 				}
-				case mlibc::charcode_error::dirty: {
-					mlibc::panicLogger() << "decode_wtranscode() charcode_error::dirty errors are not handled" << frg::endlog;
-					break;
-				}
-				case mlibc::charcode_error::output_overflow: {
-					mlibc::panicLogger() << "decode_wtranscode() charcode_error::output_overflow errors are not handled" << frg::endlog;
-					break;
+				case mlibc::transcode_status::output_overflow: {
+					__ensure(!"unexpected transcode error");
 				}
 			}
 			__builtin_unreachable();
@@ -476,12 +481,17 @@ size_t mbstowcs(wchar_t *__restrict wcs, const char *__restrict mbs, size_t wc_l
 
 	if(!wcs) {
 		size_t size;
-		if(auto e = cc->decode_wtranscode_length(nseq, &size, st); e != mlibc::charcode_error::null)
-			__ensure(!"decode_wtranscode() errors are not handled");
+		if(auto e = cc->decode_wtranscode_length(nseq, &size, st); e != mlibc::transcode_status::null_terminator && e != mlibc::transcode_status::input_exhausted) {
+			__ensure(e == mlibc::transcode_status::illegal_input || e == mlibc::transcode_status::input_underflow);
+			errno = EILSEQ;
+			return static_cast<size_t>(-1);
+		}
 		return size;
 	}
 
-	if(auto e = cc->decode_wtranscode(nseq, wseq, st); e != mlibc::charcode_error::null) {
+	auto e = cc->decode_wtranscode(nseq, wseq, st);
+	if(e != mlibc::transcode_status::null_terminator && e != mlibc::transcode_status::output_exhausted) {
+		__ensure(e != mlibc::transcode_status::input_exhausted);
 		errno = EILSEQ;
 		return size_t(-1);
 	}else{

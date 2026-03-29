@@ -11,17 +11,14 @@
 #include <sys/stat.h>
 
 #include <frg/small_vector.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/debug.hpp>
-#include <mlibc/stdlib.hpp>
+#include <mlibc/global-config.hpp>
 #include <mlibc/locale.hpp>
-#include <mlibc/strtofp.hpp>
-#include <mlibc/posix-sysdeps.hpp>
 #include <mlibc/rtld-config.hpp>
-
-namespace {
-	constexpr bool debugPathResolution = false;
-} // namespace
+#include <mlibc/stdlib.hpp>
+#include <mlibc/strtofp.hpp>
 
 // Borrowed from musl
 static uint32_t init[] = {
@@ -203,7 +200,6 @@ int mkstemps(char *pattern, int suffixlen) {
 }
 
 char *mkdtemp(char *pattern) {
-	mlibc::infoLogger() << "mlibc mkdtemp(" << pattern << ") called" << frg::endlog;
 	auto n = strlen(pattern);
 	__ensure(n >= 6);
 	if(n < 6) {
@@ -220,7 +216,7 @@ char *mkdtemp(char *pattern) {
 	// TODO: Do an exponential search.
 	for(size_t i = 0; i < 999999; i++) {
 		__ensure(sprintf(pattern + (n - 6), "%06zu", i) == 6);
-		if(int e = mlibc::sys_mkdir(pattern, S_IRWXU); !e) {
+		if(int e = mlibc::sysdep_or_enosys<Mkdir>(pattern, S_IRWXU); !e) {
 			return pattern;
 		}else if(e != EEXIST) {
 			errno = e;
@@ -233,7 +229,7 @@ char *mkdtemp(char *pattern) {
 }
 
 char *realpath(const char *path, char *out) {
-	if(debugPathResolution)
+	if(mlibc::globalConfig().debugPathResolution)
 		mlibc::infoLogger() << "mlibc realpath(): Called on '" << path << "'" << frg::endlog;
 	frg::string_view path_view{path};
 
@@ -280,7 +276,7 @@ char *realpath(const char *path, char *out) {
 	size_t ls = 0;
 
 	auto process_segment = [&] (frg::string_view s_view) -> int {
-		if(debugPathResolution)
+		if(mlibc::globalConfig().debugPathResolution)
 			mlibc::infoLogger() << "mlibc realpath(): resolv is '" << resolv.data() << "'"
 					<< ", segment is " << s_view.data()
 					<< ", size: " << s_view.size() << frg::endlog;
@@ -307,25 +303,25 @@ char *realpath(const char *path, char *out) {
 		resolv[rsz + s_view.size()] = 0;
 
 		// stat() the path to (1) see if it exists and (2) see if it is a link.
-		if(!mlibc::sys_stat) {
+		if constexpr (!mlibc::IsImplemented<Stat>) {
 			MLIBC_MISSING_SYSDEP();
 			return ENOSYS;
 		}
-		if(debugPathResolution)
+		if(mlibc::globalConfig().debugPathResolution)
 			mlibc::infoLogger() << "mlibc realpath(): stat()ing '"
 					<< resolv.data() << "'" << frg::endlog;
 		struct stat st;
-		if(int e = mlibc::sys_stat(mlibc::fsfd_target::path,
+		if(int e = mlibc::sysdep_or_panic<Stat>(mlibc::fsfd_target::path,
 				-1, resolv.data(), AT_SYMLINK_NOFOLLOW, &st); e)
 			return e;
 
 		if(S_ISLNK(st.st_mode)) {
-			if(debugPathResolution) {
+			if(mlibc::globalConfig().debugPathResolution) {
 				mlibc::infoLogger() << "mlibc realpath(): Encountered symlink '"
 					<< resolv.data() << "'" << frg::endlog;
 			}
 
-			if(!mlibc::sys_readlink) {
+			if constexpr (!mlibc::IsImplemented<Readlink>) {
 				MLIBC_MISSING_SYSDEP();
 				return ENOSYS;
 			}
@@ -333,10 +329,10 @@ char *realpath(const char *path, char *out) {
 			ssize_t sz = 0;
 			char path[512];
 
-			if (int e = mlibc::sys_readlink(resolv.data(), path, 512, &sz); e)
+			if (int e = mlibc::sysdep_or_panic<Readlink>(resolv.data(), path, 512, &sz); e)
 				return e;
 
-			if(debugPathResolution) {
+			if(mlibc::globalConfig().debugPathResolution) {
 				mlibc::infoLogger() << "mlibc realpath(): Symlink resolves to '"
 					<< frg::string_view{path, static_cast<size_t>(sz)} << "'" << frg::endlog;
 			}
@@ -352,7 +348,7 @@ char *realpath(const char *path, char *out) {
 				strncpy(resolv.data(), path, sz);
 				resolv.data()[sz] = 0;
 
-				if(debugPathResolution) {
+				if(mlibc::globalConfig().debugPathResolution) {
 					mlibc::infoLogger() << "mlibc realpath(): Symlink is absolute, resolv: '"
 						<< resolv.data() << "'" << frg::endlog;
 				}
@@ -369,7 +365,7 @@ char *realpath(const char *path, char *out) {
 
 				ls = 0;
 
-				if(debugPathResolution) {
+				if(mlibc::globalConfig().debugPathResolution) {
 					mlibc::infoLogger() << "mlibc realpath(): Symlink is relative, resolv: '"
 						<< resolv.data() << "' lnk: '"
 						<< frg::string_view{lnk.data(), lnk.size()} << "'" << frg::endlog;
@@ -426,7 +422,7 @@ char *realpath(const char *path, char *out) {
 		resolv.push_back(0);
 	}
 
-	if(debugPathResolution)
+	if(mlibc::globalConfig().debugPathResolution)
 		mlibc::infoLogger() << "mlibc realpath(): Returns '" << resolv.data() << "'" << frg::endlog;
 
 	if(resolv.size() > PATH_MAX) {
@@ -445,20 +441,13 @@ char *realpath(const char *path, char *out) {
 // ----------------------------------------------------------------------------
 
 int ptsname_r(int fd, char *buffer, size_t length) {
-	auto sysdep = MLIBC_CHECK_OR_ENOSYS(mlibc::sys_ptsname, ENOSYS);
-
-	if(int e = sysdep(fd, buffer, length); e)
-		return e;
-
-	return 0;
+	return mlibc::sysdep_or_enosys<Ptsname>(fd, buffer, length);
 }
 
 char *ptsname(int fd) {
 	static char buffer[128];
 
-	auto sysdep = MLIBC_CHECK_OR_ENOSYS(mlibc::sys_ptsname, NULL);
-
-	if(int e = sysdep(fd, buffer, 128); e) {
+	if(int e = mlibc::sysdep_or_enosys<Ptsname>(fd, buffer, 128); e) {
 		errno = e;
 		return nullptr;
 	}
@@ -469,10 +458,10 @@ char *ptsname(int fd) {
 int posix_openpt(int flags) {
 	int fd, e;
 
-	if(mlibc::sys_openpt) {
-		e = mlibc::sys_openpt(flags, &fd);
+	if constexpr (mlibc::IsImplemented<Openpt>) {
+		e = mlibc::sysdep_or_enosys<Openpt>(flags, &fd);
 	} else {
-		e = mlibc::sys_open("/dev/ptmx", flags, 0, &fd);
+		e = mlibc::sysdep<Open>("/dev/ptmx", flags, 0, &fd);
 	}
 
 	if (e) {
@@ -484,9 +473,7 @@ int posix_openpt(int flags) {
 }
 
 int unlockpt(int fd) {
-	auto sysdep = MLIBC_CHECK_OR_ENOSYS(mlibc::sys_unlockpt, -1);
-
-	if(int e = sysdep(fd); e) {
+	if(int e = mlibc::sysdep_or_enosys<Unlockpt>(fd); e) {
 		errno = e;
 		return -1;
 	}

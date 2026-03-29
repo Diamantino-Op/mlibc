@@ -3,13 +3,11 @@
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(void) {
-	// TODO: enable for mlibc once locale support is merged
-#if defined(USE_HOST_LIBC) || defined(USE_CROSS_LIBC)
 	char *lang = setlocale(LC_ALL, "en_US.utf8");
 	assert(lang);
-#endif
 
 	size_t mbslen = mbstowcs(NULL, "ßß", 0);
 	assert(mbslen == 2);
@@ -21,8 +19,11 @@ int main(void) {
 	assert(mbslen == 0);
 
 	wchar_t buf[10];
+	memset(buf, 0x42, sizeof(buf));
 	mbslen = mbstowcs(buf, "", 1);
 	assert(mbslen == 0);
+	assert(buf[0] == L'\0');
+	assert(buf[1] == 0x42424242);
 
 	// python's "checking" of the function for detecting locale charcode (lol)
 	for (unsigned int i = 0x80; i <= 0xff; i++) {
@@ -34,18 +35,30 @@ int main(void) {
 		mbstowcs(wch, ch, 1);
 	}
 
-	// print ✨
+	// ✨
+	memset(buf, 0x42, sizeof(buf));
 	mbslen = mbstowcs(buf, "\xE2\x9C\xA8", 10);
 	assert(mbslen == 1);
+	assert(buf[0] == L'✨');
+	assert(buf[1] == L'\0');
+	assert(buf[2] == 0x42424242);
 
-	// print ✨⛔
+	// ✨⛔
+	memset(buf, 0x42, sizeof(buf));
 	mbslen = mbstowcs(buf, "\xE2\x9C\xA8\xE2\x9B\x94", 1);
 	assert(mbslen == 1);
+	assert(buf[0] == L'✨');
+	assert(buf[1] == 0x42424242);
 
-	// print truncated ✨
+	// truncated ✨
 	mbslen = mbstowcs(buf, "\xE2\x9C", 10);
 	assert(mbslen == (size_t) -1);
 	assert(errno == EILSEQ);
+
+	memset(buf, 0x42, sizeof(buf));
+	mbslen = mbstowcs(buf, "", 1);
+	assert(mbslen == 0);
+	assert(buf[0] == L'\0');
 
 	return 0;
 }

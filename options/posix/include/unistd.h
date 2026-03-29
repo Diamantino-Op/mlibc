@@ -15,7 +15,7 @@
 #include <abi-bits/pid_t.h>
 #include <abi-bits/seek-whence.h>
 
-#if __MLIBC_SYSDEP_HAS_BITS_SYSCALL_H && __MLIBC_LINUX_OPTION
+#if __MLIBC_SYSDEP_HAS_BITS_SYSCALL_H && __MLIBC_LINUX_OPTION && defined(_DEFAULT_SOURCE)
 #include <bits/syscall.h>
 #endif /* __MLIBC_SYSDEP_HAS_BITS_SYSCALL_H && __MLIBC_LINUX_OPTION */
 
@@ -49,6 +49,7 @@ extern "C" {
 #define _POSIX_THREAD_SAFE_FUNCTIONS _POSIX_VERSION
 #define _POSIX_TIMEOUTS _POSIX_VERSION
 #define _POSIX_TIMERS _POSIX_VERSION
+#define _POSIX_DEVICE_CONTROL _POSIX_VERSION
 
 /* mmap, msync, munmap */
 #define _POSIX_MAPPED_FILES _POSIX_VERSION
@@ -257,7 +258,6 @@ extern "C" {
 
 #if defined (__ironclad__)
 #define _SC_TOTAL_PAGES 1000
-#define _SC_HOST_OPEN_MAX 1001
 #endif /* defined (__ironclad__) */
 
 #define STDERR_FILENO 2
@@ -312,6 +312,7 @@ int fchownat(int __fd, const char *__path, uid_t __uid, gid_t __gid, int __flags
 int fdatasync(int __fd);
 int fexecve(int __fd, char *const __argv[], char *const __envp[]);
 pid_t fork(void);
+pid_t _Fork(void);
 
 /* functions removed in Issue 7 */
 #if defined(_DEFAULT_SOURCE) || (defined(__MLIBC_XOPEN) && __MLIBC_XOPEN < 700)

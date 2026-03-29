@@ -68,7 +68,7 @@ extern "C" {
 #define PTHREAD_RWLOCK_INITIALIZER {0, 0, 0}
 #define PTHREAD_SPIN_INITIALIZER {0}
 
-#define PTHREAD_CANCELED ((void*) -1)
+#define PTHREAD_CANCELED __MLIBC_THREAD_CANCELED
 
 #define PTHREAD_BARRIER_SERIAL_THREAD -1
 
@@ -81,6 +81,12 @@ extern "C" {
 #define PTHREAD_STACK_MIN 16384
 
 #define PTHREAD_ATTR_NO_SIGMASK_NP (-1)
+
+#ifdef __MLIBC_XOPEN
+#define PTHREAD_RWLOCK_PREFER_READER_NP 0
+#define PTHREAD_RWLOCK_PREFER_WRITER_NP 1
+#define PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP 2
+#endif /* __MLIBC_XOPEN */
 
 #include <bits/posix/pthread_types.h>
 
@@ -100,8 +106,10 @@ int pthread_attr_setdetachstate(pthread_attr_t *__attr, int __state);
 int pthread_attr_getstacksize(const pthread_attr_t *__restrict __attr, size_t *__restrict __stacksize);
 int pthread_attr_setstacksize(pthread_attr_t *__attr, size_t __stacksize);
 
+#if defined(_DEFAULT_SOURCE) || (__MLIBC_POSIX1 && !__MLIBC_POSIX2008)
 int pthread_attr_getstackaddr(const pthread_attr_t *__attr, void **__stackaddr);
 int pthread_attr_setstackaddr(pthread_attr_t *__attr, void *__stackaddr);
+#endif /* defined(_DEFAULT_SOURCE) || (__MLIBC_POSIX1 && !__MLIBC_POSIX2008) */
 
 int pthread_attr_getstack(const pthread_attr_t *__attr, void **__stackaddr, size_t *__stacksize);
 int pthread_attr_setstack(pthread_attr_t *__attr, void *__stackaddr, size_t __stacksize);
@@ -290,6 +298,12 @@ int pthread_spin_destroy(pthread_spinlock_t *__lock);
 int pthread_spin_lock(pthread_spinlock_t *__lock);
 int pthread_spin_trylock(pthread_spinlock_t *__lock);
 int pthread_spin_unlock(pthread_spinlock_t *__lock);
+
+#ifdef __MLIBC_XOPEN
+int pthread_rwlockattr_setkind_np(pthread_rwlockattr_t *__attr, int __pref);
+int pthread_rwlockattr_getkind_np(const pthread_rwlockattr_t *__restrict __attr,
+		int *__restrict __pref);
+#endif /* __MLIBC_XOPEN */
 
 #endif /* !__MLIBC_ABI_ONLY */
 

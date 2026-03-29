@@ -47,6 +47,12 @@ struct category_item {
 		return std::get<frg::string_view>(value);
 	}
 
+	frg::basic_string_view<wchar_t> asWideString() const {
+		if (std::holds_alternative<std::monostate>(value))
+			return {L""};
+		return std::get<frg::basic_string_view<wchar_t>>(value);
+	}
+
 	uint32_t asUint32() const {
 		return std::get<uint32_t>(value);
 	}
@@ -143,6 +149,10 @@ struct nl_ctype : nl_category<LC_CTYPE, _NL_NUM_LC_CTYPE> {
 
 	frg::string_view class_names() {
 		return get(_NL_CTYPE_CLASS_NAMES).asString();
+	}
+
+	frg::string_view map_names() {
+		return get(_NL_CTYPE_MAP_NAMES).asString();
 	}
 
 	uint32_t class_offset() {

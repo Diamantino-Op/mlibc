@@ -61,6 +61,8 @@ typedef unsigned long int greg_t;
 #define FPE_FLTINV      7       /* floating point invalid operation */
 #define FPE_FLTSUB      8       /* subscript out of range */
 
+#define SIG2STR_MAX 16
+
 #ifndef __MLIBC_ABI_ONLY
 
 /* functions to block / wait for signals */
@@ -82,7 +84,7 @@ int siginterrupt(int __sig, int __flag);
 #if defined(_DEFAULT_SOURCE) || __MLIBC_XOPEN
 int sigaltstack(const stack_t *__restrict __ss, stack_t *__restrict __oss);
 
-int killpg(int __pgrp, int __sig);
+int killpg(pid_t __pgrp, int __sig);
 #endif /* defined(_DEFAULT_SOURCE) || __MLIBC_XOPEN */
 
 int kill(pid_t __pid, int __number);
@@ -96,6 +98,12 @@ int sigisemptyset(const sigset_t *__set);
 #endif /* __MLIBC_GLIBC_OPTION && defined(_GNU_SOURCE) */
 
 int sigqueue(pid_t __pid, int __sig, const union sigval __value);
+
+int sig2str(int __signum, char *__str);
+int str2sig(const char *__restrict __str, int *__restrict __pnum);
+
+void psiginfo(const siginfo_t *__pinfo, const char *__message);
+void psignal(int __signum, const char *__message);
 
 #endif /* !__MLIBC_ABI_ONLY */
 
