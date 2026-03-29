@@ -1,5 +1,5 @@
-#ifndef _ASTRAL_SYSCALL_H
-#define _ASTRAL_SYSCALL_H
+#ifndef _HORIZONOS_SYSCALL_H
+#define _HORIZONOS_SYSCALL_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -123,4 +123,4 @@ static long syscall(long func, long* ret, uint64_t p1 = 0, uint64_t p2 = 0, uint
 
 #endif /* !__MLIBC_ABI_ONLY */
 
-#endif /* _ASTRAL_SYSCALL_H */
+#endif /* _HORIZONOS_SYSCALL_H */
