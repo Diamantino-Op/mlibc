@@ -65,35 +65,21 @@ if not headers_only
 	use_freestnd_hdrs = get_option('use_freestnd_hdrs').disable_auto_if(
 			target_triple.to_lower().contains('mlibc'))
 
-	if host_machine.system() != 'horizonos'
-		freestnd_c_hdrs_dep = dependency(
-			'freestnd-c-hdrs-' + host_machine.cpu_family(),
-			required: use_freestnd_hdrs,
-			fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
-		)
-		libc_deps += freestnd_c_hdrs_dep
-		rtld_deps += freestnd_c_hdrs_dep
+	freestnd_c_hdrs_dep = dependency(
+		'freestnd-c-hdrs-' + host_machine.cpu_family(),
+		required: use_freestnd_hdrs,
+		fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
+	)
+	libc_deps += freestnd_c_hdrs_dep
+	rtld_deps += freestnd_c_hdrs_dep
 
-		freestnd_cxx_hdrs_dep = dependency(
-			'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
-			required: use_freestnd_hdrs,
-			fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
-		)
-		libc_deps += freestnd_cxx_hdrs_dep
-		rtld_deps += freestnd_cxx_hdrs_dep
-	else
-		deps_proj = subproject('horizon_deps')
-
-		freestnd_c_hdrs_dep = deps_proj.get_variable('freestnd_c_hdrs_dep')
-
-		libc_deps += freestnd_c_hdrs_dep
-		rtld_deps += freestnd_c_hdrs_dep
-
-		freestnd_cxx_hdrs_dep = deps_proj.get_variable('freestnd_cxx_hdrs_dep')
-
-		libc_deps += freestnd_cxx_hdrs_dep
-		rtld_deps += freestnd_cxx_hdrs_dep
-	endif
+	freestnd_cxx_hdrs_dep = dependency(
+		'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
+		required: use_freestnd_hdrs,
+		fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
+	)
+	libc_deps += freestnd_cxx_hdrs_dep
+	rtld_deps += freestnd_cxx_hdrs_dep
 
 	frigg_dep = dependency(
 		'frigg',
