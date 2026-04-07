@@ -131,15 +131,6 @@ if not headers_only
 			error('could not find compiler-specific header directory')
 		endif
 
-		if c_compiler.get_id() == 'gcc' and fs.exists(ccdir / 'include-fixed')
-			rtld_include_dirs += include_directories(ccdir / 'include-fixed')
-			libc_include_dirs += include_directories(ccdir / 'include-fixed')
-		endif
-
-		if host_machine.system() == 'horizonos'
-			ccdir = ccdir.replace(meson.global_source_root(), '../../..')
-		endif
-
 		rtld_include_dirs += include_directories(ccdir / 'include')
 		libc_include_dirs += include_directories(ccdir / 'include')
 	endif
@@ -295,7 +286,6 @@ elif host_machine.system() == 'zinnia'
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/zinnia')
-	subdir('sysdeps/menix')
 elif host_machine.system() == 'horizonos'
 	rtld_include_dirs += include_directories('sysdeps/horizonos/include')
 	libc_include_dirs += include_directories('sysdeps/horizonos/include')

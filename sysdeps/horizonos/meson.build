@@ -5,7 +5,7 @@ sysdep_supported_options = {
 	'bsd': true,
 }
 
-rtld_sources += files(
+rtld_dso_sources += files(
 	'generic/generic.cpp',
     'generic/horizonos.cpp',
 )

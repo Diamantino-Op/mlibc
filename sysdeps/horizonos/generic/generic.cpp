@@ -15,56 +15,81 @@
 #include <dirent.h>
 
 namespace mlibc {
-	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
-		(void)size;
-		(void)list;
-		// TODO unstub
-		return 0;
+	// Print
+
+	void Sysdeps<LibcLog>::operator()(const char *message) {
+		long ret;
+		syscall(SYSCALL_PRINT, &ret, (uint64_t)message);
 	}
 
-	int Sysdeps<GetGroups>::operator()(size_t size, gid_t *list, int *ret) {
-		(void)size;
-		(void)list;
-		(void)ret;
-		// TODO unstub
-		*ret = 0;
-		return 0;
+	[[noreturn]] void Sysdeps<LibcPanic>::operator()() {
+		sysdep<LibcLog>("mlibc: panic");
+		sysdep<Exit>(1);
 	}
 
-	int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number,
-		void *__restrict buffer, socklen_t *__restrict size) {
-		(void)size;
-		(void)buffer;
-		// TODO unstub
-		mlibc::infoLogger() << "getsockopt: " << fd << " " << layer << " " << number << frg::endlog;
-		return 0;
+	// Map
+
+	int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
+		long ret;
+		long err = syscall(SYSCALL_MMAP, &ret, (uint64_t)hint, size, prot, flags, fd, offset);
+		*window = (void *)ret;
+		return err;
 	}
 
-	int Sysdeps<InetConfigured>::operator()(bool *ipv4, bool *ipv6) {
-		// there is no ipv6 support in the kernel currently and no way of checking for configured interfaces
-		*ipv4 = true;
-		*ipv6 = false;
-		return 0;
+	// Unmap
+
+	int Sysdeps<VmUnmap>::operator()(void *pointer, size_t size) {
+		long ret;
+		return syscall(SYSCALL_MUNMAP, &ret, (uintptr_t)pointer, size);
 	}
 
-	int Sysdeps<Readv>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
+	// Get TID
+
+	int Sysdeps<FutexTid>::operator()() {
+		long ret;
+		syscall(SYSCALL_GETTID, &ret);
+		return ret;
+	}
+
+	pid_t Sysdeps<GetTid>::operator()() {
+		long ret;
+		syscall(SYSCALL_GETTID, &ret);
+		return ret;
+	}
+
+	// Set FSBASE
+
+	int Sysdeps<TcbSet>::operator()(void *pointer) {
 		long r;
-		int error = syscall(SYSCALL_READV, &r, fd, (uint64_t)iovs, iovc);
-		*bytes_read = r;
-		return error;
+		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, (uint64_t)pointer);
 	}
 
-	int Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
-		long r;
-		int error = syscall(SYSCALL_WRITEV, &r, fd, (uint64_t)iovs, iovc);
-		*bytes_written = r;
-		return error;
+	// Exit
+
+	[[noreturn]] void Sysdeps<Exit>::operator()(int status) {
+		syscall(SYSCALL_EXIT, NULL, status);
+		__builtin_unreachable();
 	}
+
+	// Get Clock
+
+	int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
+		struct timespec ts;
+		long ret;
+		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, (uint64_t)&ts);
+		*secs = ts.tv_sec;
+		*nanos = ts.tv_nsec;
+		return err;
+	}
+
+	// Sysinfo
 
 	int Sysdeps<Sysinfo>::operator()(struct sysinfo *info) {
 		long r;
 		return syscall(SYSCALL_SYSINFO, &r, (uint64_t)info);
 	}
+
+	// Get CPU
 
 	int Sysdeps<Getcpu>::operator()(int *cpu) {
 		long ret;
@@ -74,144 +99,63 @@ namespace mlibc {
 		return 0;
 	}
 
-	int Sysdeps<Flock>::operator()(int fd, int options) {
-		long r;
-		return syscall(SYSCALL_FLOCK, &r, fd, options);
-	}
-
-	int Sysdeps<Nice>::operator()(int nice, int *ret) {
-		long r = -1;
-		long e = syscall(SYSCALL_NICE, &r, nice);
-		*ret = r;
-		return e;
-	}
-
-	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
-		long ret;
-		return syscall(SYSCALL_SHUTDOWN, &ret, sockfd, how);
-	}
+	// Kill Thread
 
 	int Sysdeps<Tgkill>::operator()(int pid, int tid, int sig) {
 		long ret;
 		return syscall(SYSCALL_KILLTHREAD, &ret, pid, tid, sig);
 	}
 
-	int Sysdeps<Sigpending>::operator()(sigset_t *set) {
+	// Pause
+
+	int Sysdeps<Pause>::operator()() {
 		long ret;
-		return syscall(SYSCALL_SIGPENDING, &ret, (uint64_t)set);
+		return syscall(SYSCALL_PAUSE, &ret);
 	}
 
-	int Sysdeps<Sigtimedwait>::operator()(const sigset_t *__restrict set, siginfo_t *__restrict info, const struct timespec *__restrict timeout, int *out_signal) {
+	int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
+		/*struct timespec ts;
+		ts.tv_sec = *secs;
+		ts.tv_nsec = *nanos;
 		long ret;
-		long err = syscall(SYSCALL_SIGTIMEDWAIT, &ret, (uint64_t)set, (uint64_t)info, (uint64_t)timeout);
-		*out_signal = ret;
+		long err = syscall(SYSCALL_NANOSLEEP, &ret, (uintptr_t)&ts, (uintptr_t)&ts);
+		*secs = ts.tv_sec;
+		*nanos = ts.tv_nsec;
+		return err;*/
+
+		(void)secs;
+		(void)nanos;
+		return 0;
+	}
+
+	pid_t Sysdeps<GetPid>::operator()() {
+		return 0;
+	}
+
+	int Sysdeps<Kill>::operator()(pid_t pid, int signal) {
+		(void)pid;
+		(void)signal;
+		return 0;
+	}
+
+#ifndef MLIBC_BUILDING_RTLD
+
+	[[noreturn]] void Sysdeps<ThreadExit>::operator()() {
+		syscall(SYSCALL_THREADEXIT, nullptr);
+		__builtin_unreachable();
+	}
+
+	extern "C" void __mlibc_thread_entry();
+
+	int Sysdeps<Clone>::operator()(void *tcb, pid_t *pid_out, void *stack) {
+		(void)tcb;
+		long ret;
+		long err = syscall(SYSCALL_NEWTHREAD, &ret, (uintptr_t)__mlibc_thread_entry, (uintptr_t)stack);
+		*pid_out = ret;
 		return err;
 	}
 
-	int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
-		long ret;
-		return syscall(SYSCALL_SIGSUSPEND, &ret, (uint64_t)set);
-	}
-
-	int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
-		long ret;
-		return syscall(SYSCALL_MPROTECT, &ret, (uint64_t)pointer, size, prot);
-	}
-
-	int Sysdeps<SetUid>::operator()(uid_t id) {
-		long ret;
-		return syscall(SYSCALL_SETUID, &ret, id);
-	}
-
-	int Sysdeps<SetGid>::operator()(gid_t id) {
-		long ret;
-		return syscall(SYSCALL_SETGID, &ret, id);
-	}
-
-	int Sysdeps<SetEuid>::operator()(uid_t id) {
-		long ret;
-		return syscall(SYSCALL_SETEUID, &ret, id);
-	}
-
-	int Sysdeps<SetEgid>::operator()(gid_t id) {
-		long ret;
-		return syscall(SYSCALL_SETEGID, &ret, id);
-	}
-
-	uid_t Sysdeps<GetUid>::operator()() {
-		uid_t r, e, s;
-		sysdep<GetResuid>(&r, &e, &s);
-
-		return r;
-	}
-
-	uid_t Sysdeps<GetEuid>::operator()() {
-		uid_t r, e, s;
-		sysdep<GetResuid>(&r, &e, &s);
-
-		return e;
-	}
-
-	gid_t Sysdeps<GetGid>::operator()() {
-		gid_t r, e, s;
-		sysdep<GetResgid>(&r, &e, &s);
-
-		return r;
-	}
-
-	gid_t Sysdeps<GetEgid>::operator()() {
-		gid_t r, e, s;
-		sysdep<GetResgid>(&r, &e, &s);
-
-		return e;
-	}
-
-	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
-		long ret;
-		return syscall(SYSCALL_SETRESUID, &ret, _ruid, _euid, _suid);
-	}
-
-	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
-		long ret;
-		return syscall(SYSCALL_SETRESGID, &ret, _rgid, _egid, _sgid);
-	}
-
-	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
-		long ret;
-		return syscall(SYSCALL_GETRESUID, &ret, (uint64_t)ruid, (uint64_t)euid, (uint64_t)suid);
-	}
-
-	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
-		long ret;
-		return syscall(SYSCALL_GETRESGID, &ret, (uint64_t)rgid, (uint64_t)egid, (uint64_t)sgid);
-	}
-
-	int Sysdeps<Mknodat>::operator()(int dirfd, const char *path, int mode, int dev) {
-		long ret;
-		return syscall(SYSCALL_MKNODAT, &ret, dirfd, (uint64_t)path, mode, dev);
-	}
-
-	int Sysdeps<Mkfifoat>::operator()(int dirfd, const char *path, mode_t mode) {
-		return sysdep<Mknodat>(dirfd, path, S_IFIFO | mode, 0);
-	}
-
-	int Sysdeps<Rmdir>::operator()(const char *path) {
-		return sysdep<Unlinkat>(AT_FDCWD, path, AT_REMOVEDIR);
-	}
-
-	int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
-		long readc;
-		long error = syscall(SYSCALL_PREAD, &readc, fd, (uint64_t)buf, n, off);
-		*bytes_read = readc;
-		return error;
-	}
-
-	int Sysdeps<Pwrite>::operator()(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_written) {
-		long writec;
-		long error = syscall(SYSCALL_PWRITE, &writec, fd, (uint64_t)buf, n, off);
-		*bytes_written = writec;
-		return error;
-	}
+#endif
 
 	int Sysdeps<GetRlimit>::operator()(int resource, struct rlimit *limit) {
 		switch(resource) {
@@ -224,7 +168,7 @@ namespace mlibc {
 		}
 	}
 
-	#ifndef MLIBC_BUILDING_RTLD
+#ifndef MLIBC_BUILDING_RTLD
 
 	typedef struct {
 		ino_t d_ino;
@@ -234,56 +178,800 @@ namespace mlibc {
 		char d_name[1024];
 	} dent_t;
 
-	#endif
+#endif
 
-	int Sysdeps<Pause>::operator()() {
-		long ret;
-		return syscall(SYSCALL_PAUSE, &ret);
+// Alloc
+
+	int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
+		size += 4096 - (size % 4096);
+		return sysdep<VmMap>(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, 0, pointer);
+	}
+
+	int Sysdeps<AnonFree>::operator()(void *pointer, size_t size) {
+		size += 4096 - (size % 4096);
+		return sysdep<VmUnmap>(pointer, size);
+	}
+
+// Stubs
+#ifndef MLIBC_BUILDING_RTLD
+	extern "C" void __mlibc_restorer();
+
+	int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *__restrict act,
+		struct sigaction *__restrict oldact) {
+		(void)sig;
+		(void)act;
+		(void)oldact;
+		return 0;
+	}
+#endif
+
+	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
+		(void)size;
+		(void)list;
+		return 0;
+	}
+
+	int Sysdeps<GetGroups>::operator()(size_t size, gid_t *list, int *ret) {
+		(void)size;
+		(void)list;
+		*ret = 0;
+		return 0;
+	}
+
+	int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number, void *__restrict buffer, socklen_t *__restrict size) {
+		(void)fd;
+		(void)layer;
+		(void)number;
+		(void)buffer;
+		(void)size;
+		return 0;
+	}
+
+	int Sysdeps<InetConfigured>::operator()(bool *ipv4, bool *ipv6) {
+		(void)ipv4;
+		(void)ipv6;
+		return 0;
+	}
+
+	int Sysdeps<Readv>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
+		(void)fd;
+		(void)iovs;
+		(void)iovc;
+		(void)bytes_read;
+		return 0;
+	}
+
+	int Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
+		(void)fd;
+		(void)iovs;
+		(void)iovc;
+		(void)bytes_written;
+		return 0;
+	}
+
+	int Sysdeps<Flock>::operator()(int fd, int options) {
+		(void)fd;
+		(void)options;
+		return 0;
+	}
+
+	int Sysdeps<Nice>::operator()(int nice, int *ret) {
+		(void)nice;
+		*ret = 0;
+		return 0;
+	}
+
+	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
+		(void)sockfd;
+		(void)how;
+		return 0;
+	}
+
+	int Sysdeps<Sigpending>::operator()(sigset_t *set) {
+		(void)set;
+		return 0;
+	}
+
+	int Sysdeps<Sigtimedwait>::operator()(const sigset_t *__restrict set, siginfo_t *__restrict info, const struct timespec *__restrict timeout, int *out_signal) {
+		(void)set;
+		(void)info;
+		(void)timeout;
+		(void)out_signal;
+		return 0;
+	}
+
+	int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
+		(void)set;
+		return 0;
+	}
+
+	int Sysdeps<SetUid>::operator()(uid_t id) {
+		(void)id;
+		return 0;
+	}
+
+	int Sysdeps<SetGid>::operator()(gid_t id) {
+		(void)id;
+		return 0;
+	}
+
+	int Sysdeps<SetEuid>::operator()(uid_t id) {
+		(void)id;
+		return 0;
+	}
+
+	int Sysdeps<SetEgid>::operator()(gid_t id) {
+		(void)id;
+		return 0;
+	}
+
+	uid_t Sysdeps<GetUid>::operator()() {
+		return 0;
+	}
+
+	uid_t Sysdeps<GetEuid>::operator()() {
+		return 0;
+	}
+
+	gid_t Sysdeps<GetGid>::operator()() {
+		return 0;
+	}
+
+	gid_t Sysdeps<GetEgid>::operator()() {
+		return 0;
+	}
+
+	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
+		(void)_ruid;
+		(void)_euid;
+		(void)_suid;
+		return 0;
+	}
+
+	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
+		(void)_rgid;
+		(void)_egid;
+		(void)_sgid;
+		return 0;
+	}
+
+	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
+		(void)ruid;
+		(void)euid;
+		(void)suid;
+		return 0;
+	}
+
+	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
+		(void)rgid;
+		(void)egid;
+		(void)sgid;
+		return 0;
+	}
+
+	int Sysdeps<Mknodat>::operator()(int dirfd, const char *path, int mode, int dev) {
+		(void)dirfd;
+		(void)path;
+		(void)mode;
+		(void)dev;
+		return 0;
+	}
+
+	int Sysdeps<Mkfifoat>::operator()(int dirfd, const char *path, mode_t mode) {
+		(void)dirfd;
+		(void)path;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
+		(void)fd;
+		(void)buf;
+		(void)n;
+		(void)off;
+		(void)bytes_read;
+		return 0;
+	}
+
+	int Sysdeps<Pwrite>::operator()(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_written) {
+		(void)fd;
+		(void)buf;
+		(void)n;
+		(void)off;
+		(void)bytes_written;
+		return 0;
 	}
 
 	int Sysdeps<Chroot>::operator()(const char *path) {
-		long ret;
-		return syscall(SYSCALL_CHROOT, &ret, (uint64_t)path);
+		(void)path;
+		return 0;
 	}
 
 	int Sysdeps<Peername>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
-		long ret;
-		int len = max_addr_length;
-		long error = syscall(SYSCALL_GETPEERNAME, &ret, fd, (uint64_t)addr_ptr, (uint64_t)&len);
-		*actual_length = len;
-		return error;
+		(void)fd;
+		(void)addr_ptr;
+		(void)max_addr_length;
+		(void)actual_length;
+		return 0;
 	}
 
 	int Sysdeps<Sockname>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
-		long ret;
-		int len = max_addr_length;
-		long error = syscall(SYSCALL_GETSOCKNAME, &ret, fd, (uint64_t)addr_ptr, (uint64_t)&len);
-		*actual_length = len;
-		return error;
+		(void)fd;
+		(void)addr_ptr;
+		(void)max_addr_length;
+		(void)actual_length;
+		return 0;
 	}
 
 	int Sysdeps<Socketpair>::operator()(int domain, int type_and_flags, int proto, int *fds) {
-		long ret = 0;
-		long err = syscall(SYSCALL_SOCKETPAIR, &ret, domain, type_and_flags, proto);
-		if(err)
-			return err;
-
-		fds[0] = ret & 0xffffffff;
-		fds[1] = (ret >> 32) & 0xffffffff;
-		return err;
+		(void)domain;
+		(void)type_and_flags;
+		(void)proto;
+		(void)fds;
+		return 0;
 	}
 
 	int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
-		long ret;
-		return syscall(SYSCALL_GETITIMER, &ret, which, (uint64_t)curr_value);
+		(void)which;
+		(void)curr_value;
+		return 0;
 	}
 
 	int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
-		long ret;
-		return syscall(SYSCALL_SETITIMER, &ret, which, (uint64_t)new_value, (uint64_t)old_value);
+		(void)which;
+		(void)new_value;
+		(void)old_value;
+		return 0;
 	}
 
-	#ifndef MLIBC_BUILDING_RTLD
+	int Sysdeps<Fsync>::operator()(int fd) {
+		(void)fd;
+		return 0;
+	}
+
+	int Sysdeps<Fdatasync>::operator()(int fd) {
+		(void)fd;
+		return 0;
+	}
+
+	pid_t Sysdeps<GetPpid>::operator()() {
+		return 0;
+	}
+
+	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
+		(void)pid;
+		(void)pgid;
+		return 0;
+	}
+
+	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
+		(void)pid;
+		(void)pgid;
+		return 0;
+	}
+
+	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
+		(void)buffer;
+		(void)bufsize;
+		return 0;
+	}
+
+	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
+		(void)buffer;
+		(void)bufsize;
+		return 0;
+	}
+
+	int Sysdeps<Uname>::operator()(struct utsname *buf) {
+		(void)buf;
+		return 0;
+	}
+
+	void Sysdeps<Sync>::operator()() {
+	}
+
+	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
+		(void)ss;
+		(void)oss;
+		return 0;
+	}
+
+	int Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid) {
+		(void)pid;
+		(void)pgid;
+		return 0;
+	}
+
+	int Sysdeps<SetSid>::operator()(pid_t *out) {
+		(void)out;
+		return 0;
+	}
+
+	int Sysdeps<Listen>::operator()(int fd, int backlog) {
+		(void)fd;
+		(void)backlog;
+		return 0;
+	}
+
+	int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
+		(void)fd;
+		(void)newfd;
+		(void)addr_ptr;
+		(void)addr_length;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)addr_length;
+		return 0;
+	}
+
+	int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
+		(void)fd;
+		(void)hdr;
+		(void)flags;
+		(void)length;
+		return 0;
+	}
+
+	int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
+		(void)fd;
+		(void)layer;
+		(void)number;
+		(void)buffer;
+		(void)size;
+		return 0;
+	}
+
+	int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
+		(void)fd;
+		(void)hdr;
+		(void)flags;
+		(void)length;
+		return 0;
+	}
+
+	int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)addr_length;
+		return 0;
+	}
+
+	int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
+		(void)family;
+		(void)type;
+		(void)protocol;
+		(void)fd;
+		return 0;
+	}
+
+	int Sysdeps<Utimensat>::operator()(int dirfd, const char *pathname, const struct timespec times[2], int flags) {
+		(void)dirfd;
+		(void)pathname;
+		(void)times;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Fchownat>::operator()(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
+		(void)dirfd;
+		(void)pathname;
+		(void)owner;
+		(void)group;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
+		(void)fd;
+		(void)size;
+		return 0;
+	}
+
+	int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
+		(void)fd;
+		(void)attr;
+		return 0;
+	}
+
+	int Sysdeps<Tcsetattr>::operator()(int fd, int act, const struct termios *attr) {
+		(void)fd;
+		(void)act;
+		(void)attr;
+		return 0;
+	}
+
+	int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
+		(void)fds;
+		(void)count;
+		(void)timeout;
+		(void)num_events;
+		return 0;
+	}
+
+	int Sysdeps<Ppoll>::operator()(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
+		(void)fds;
+		(void)nfds;
+		(void)timeout;
+		(void)sigmask;
+		(void)num_events;
+		return 0;
+	}
+
+	int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set, fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
+		(void)num_fds;
+		(void)read_set;
+		(void)write_set;
+		(void)except_set;
+		(void)timeout;
+		(void)sigmask;
+		(void)num_events;
+		return 0;
+	}
+
+	int Sysdeps<Umask>::operator()(mode_t mode, mode_t *old) {
+		(void)mode;
+		(void)old;
+		return 0;
+	}
+
+	int Sysdeps<Fchmod>::operator()(int fd, mode_t mode) {
+		(void)fd;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Fchmodat>::operator()(int fd, const char *pathname, mode_t mode, int flags) {
+		(void)fd;
+		(void)pathname;
+		(void)mode;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Chmod>::operator()(const char *pathname, mode_t mode) {
+		(void)pathname;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Readlinkat>::operator()(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length) {
+		(void)dirfd;
+		(void)path;
+		(void)buffer;
+		(void)max_size;
+		(void)length;
+		return 0;
+	}
+
+	int Sysdeps<Readlink>::operator()(const char *path, void *buffer, size_t max_size, ssize_t *length) {
+		(void)path;
+		(void)buffer;
+		(void)max_size;
+		(void)length;
+		return 0;
+	}
+
+	int Sysdeps<Linkat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {
+		(void)olddirfd;
+		(void)old_path;
+		(void)newdirfd;
+		(void)new_path;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Link>::operator()(const char *old_path, const char *new_path) {
+		(void)old_path;
+		(void)new_path;
+		return 0;
+	}
+
+	int Sysdeps<Symlinkat>::operator()(const char *target_path, int dirfd, const char *link_path) {
+		(void)target_path;
+		(void)dirfd;
+		(void)link_path;
+		return 0;
+	}
+
+	int Sysdeps<Symlink>::operator()(const char *target_path, const char *link_path) {
+		(void)target_path;
+		(void)link_path;
+		return 0;
+	}
+
+	int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
+		(void)dirfd;
+		(void)path;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
+		(void)path;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Faccessat>::operator()(int dirfd, const char *pathname, int mode, int flags) {
+		(void)dirfd;
+		(void)pathname;
+		(void)mode;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Access>::operator()(const char *path, int mode) {
+		(void)path;
+		(void)mode;
+		return 0;
+	}
+
+	int Sysdeps<Pipe>::operator()(int *fds, int flags) {
+		(void)fds;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Chdir>::operator()(const char *path) {
+		(void)path;
+		return 0;
+	}
+
+	int Sysdeps<Fchdir>::operator()(int fd) {
+		(void)fd;
+		return 0;
+	}
+
+	int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
+		(void)fd;
+		(void)flags;
+		(void)newfd;
+		return 0;
+	}
+
+	int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
+		(void)path;
+		(void)argv;
+		(void)envp;
+		return 0;
+	}
+
+	int Sysdeps<OpenDir>::operator()(const char *path, int *handle) {
+		return sysdep<Open>(path, O_DIRECTORY, 0, handle);
+	}
+
+	int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
+		(void)handle;
+		(void)buffer;
+		(void)max_size;
+		(void)bytes_read;
+		return 0;
+	}
+
+	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
+		(void)how;
+		(void)set;
+		(void)retrieve;
+		return 0;
+	}
+
+	int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
+		(void)fsfdt;
+		(void)fd;
+		(void)path;
+		(void)flags;
+		(void)statbuf;
+		return 0;
+	}
+
+	int Sysdeps<Rmdir>::operator()(const char *path) {
+		return sysdep<Unlinkat>(AT_FDCWD, path, AT_REMOVEDIR);
+	}
+
+	int Sysdeps<Unlinkat>::operator()(int fd, const char *path, int flags) {
+		(void)fd;
+		(void)path;
+		(void)flags;
+		return 0;
+	}
+
+	int Sysdeps<Rename>::operator()(const char *path, const char *new_path) {
+		return sysdep<Renameat>(AT_FDCWD, path, AT_FDCWD, new_path);
+	}
+
+	int Sysdeps<Renameat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path) {
+		(void)olddirfd;
+		(void)old_path;
+		(void)newdirfd;
+		(void)new_path;
+		return 0;
+	}
+
+	int Sysdeps<Isatty>::operator()(int fd) {
+		(void)fd;
+		return 0;
+	}
+
+	int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
+		(void)fd;
+		(void)request;
+		(void)args;
+		(void)result;
+		return 0;
+	}
+
+	int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t mode, int *fd) {
+		(void)dirfd;
+		(void)path;
+		(void)flags;
+		(void)mode;
+		(void)fd;
+		return 0;
+	}
+
+	int Sysdeps<Fork>::operator()(pid_t *pid) {
+		(void)pid;
+		return 0;
+	}
+
+	int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
+		(void)pid;
+		(void)status;
+		(void)flags;
+		(void)ru;
+		(void)ret_pid;
+		return 0;
+	}
+
+	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
+		(void)fd;
+		(void)flags;
+		(void)newfd;
+		return 0;
+	}
+
+#ifndef MLIBC_BUILDING_RTLD
+	int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
+		int fd;
+		int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
+		if(error)
+			mlibc::panicLogger() << "/dev/urandom open error " << strerror(error) << frg::endlog;
+
+		ssize_t bytes;
+		error = sysdep<Read>(fd, buffer, length, &bytes);
+		if(error) {
+			mlibc::infoLogger() << "/dev/urandom read error " << strerror(error) << frg::endlog;
+			return error;
+		}
+
+		sysdep<Close>(fd);
+		return 0;
+	}
+#endif
+
+	int Sysdeps<Mount>::operator()(const char *source, const char *target, const char *fstype, unsigned long flags, const void *data) {
+		(void)source;
+		(void)target;
+		(void)fstype;
+		(void)flags;
+		(void)data;
+		return 0;
+	}
+
+	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
+		(void)fd;
+		(void)request;
+		(void)arg;
+		(void)result;
+		return 0;
+	}
+
+	int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
+		(void)pointer;
+		(void)size;
+		(void)prot;
+		return 0;
+	}
+
+	int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
+		(void)pointer;
+		(void)expected;
+		(void)time;
+		return 0;
+	}
+
+	int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
+		(void)pointer;
+		(void)all;
+		return 0;
+	}
+
+	int Sysdeps<Open>::operator()(const char *pathname, int flags, mode_t mode, int *fd) {
+		(void)pathname;
+		(void)flags;
+		(void)mode;
+
+		if(fd)
+			*fd = -1;
+		return ENOSYS;
+	};
+
+	int Sysdeps<Read>::operator()(int fd, void *buff, size_t count, ssize_t *bytes_read) {
+		(void)fd;
+		(void)buff;
+		(void)count;
+
+		if(bytes_read)
+			*bytes_read = 0;
+		return ENOSYS;
+	}
+
+	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
+		if(bytes_written)
+			*bytes_written = 0;
+
+		if((fd == 1 || fd == 2) && buff && count) {
+			const char *data = static_cast<const char *>(buff);
+			size_t written = 0;
+
+			while(written < count) {
+				char message[257];
+				size_t chunk = count - written;
+				if(chunk > 256)
+					chunk = 256;
+
+				memcpy(message, data + written, chunk);
+				message[chunk] = '\0';
+
+				long ret;
+				syscall(SYSCALL_PRINT, &ret, reinterpret_cast<uint64_t>(message));
+				written += chunk;
+			}
+
+			if(bytes_written)
+				*bytes_written = static_cast<ssize_t>(written);
+			return 0;
+		}
+
+		return ENOSYS;
+	}
+
+	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
+		(void)fd;
+		(void)offset;
+		(void)whence;
+
+		if(new_offset)
+			*new_offset = 0;
+		return ESPIPE;
+	}
+
+	int Sysdeps<Close>::operator()(int fd) {
+		if(fd >= 0 && fd <= 2)
+			return 0;
+		return ENOSYS;
+	}
+
+	int Sysdeps<Ttyname>::operator()(int fd, char *buffer, size_t size) {
+		(void)fd;
+		(void)buffer;
+		(void)size;
+		return 0;
+	}
+
+	int Sysdeps<Ptsname>::operator()(int fd, char *buffer, size_t length) {
+		(void)fd;
+		(void)buffer;
+		(void)length;
+		return 0;
+	}
+
+/*#ifndef MLIBC_BUILDING_RTLD
 	#define TTY_IOCTL_NAME 0x771101141113l
 	#define TTY_NAME_MAX 32
 	#define TTY_PREFIX "/dev/"
@@ -301,59 +989,10 @@ namespace mlibc {
 		int res;
 		return sysdep<Ioctl>(fd, TTY_IOCTL_NAME, (void *)(buffer + prefixLen), &res);
 	}
-	#endif
+#endif
 
-	int Sysdeps<Fsync>::operator()(int fd) {
-		long ret;
-		return syscall(SYSCALL_FSYNC, &ret, fd);
-	}
+#ifndef MLIBC_BUILDING_RTLD
 
-	int Sysdeps<Fdatasync>::operator()(int fd) {
-		// TODO proper datasync syscall
-		return sysdep<Fsync>(fd);
-	}
-
-	pid_t Sysdeps<GetPpid>::operator()() {
-		long ret;
-		syscall(SYSCALL_GETPPID, &ret);
-		return ret;
-	}
-
-	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
-		long ret;
-		long error = syscall(SYSCALL_GETSID, &ret, pid);
-		*pgid = ret;
-		return error;
-	}
-
-	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
-		long ret;
-		long error = syscall(SYSCALL_GETPGID, &ret, pid);
-		*pgid = ret;
-		return error;
-	}
-
-	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
-		long ret;
-		return syscall(SYSCALL_HOSTNAME, &ret, 0, 0, (uint64_t)buffer, bufsize);
-	}
-
-	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
-		long ret;
-		return syscall(SYSCALL_HOSTNAME, &ret, (uint64_t)buffer, bufsize, 0, 0);
-	}
-
-	int Sysdeps<Uname>::operator()(struct utsname *buf) {
-		long ret;
-		return syscall(SYSCALL_UNAME, &ret, (uint64_t)buf);
-	}
-
-	void Sysdeps<Sync>::operator()() {
-		long ret;
-		syscall(SYSCALL_SYNC, &ret);
-	}
-
-	#ifndef MLIBC_BUILDING_RTLD
 	int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
 		int fd;
 		int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
@@ -370,24 +1009,9 @@ namespace mlibc {
 		sysdep<Close>(fd);
 		return 0;
 	}
-	#endif
+#endif*/
 
-	int Sysdeps<Kill>::operator()(pid_t pid, int signal) {
-		long ret;
-		return syscall(SYSCALL_KILL, &ret, pid, signal);
-	}
-
-	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
-		long ret;
-		return syscall(SYSCALL_SIGPROCMASK, &ret, how, (uint64_t)set, (uint64_t)retrieve);
-	}
-
-	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
-		long ret;
-		return syscall(SYSCALL_SIGALTSTACK, &ret, (uint64_t)ss, (uint64_t)oss);
-	}
-
-	#ifndef MLIBC_BUILDING_RTLD
+/*#ifndef MLIBC_BUILDING_RTLD
 	extern "C" void __mlibc_restorer();
 
 	int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *__restrict act,
@@ -418,165 +1042,9 @@ namespace mlibc {
 
 		return 0;
 	}
-	#endif
+#endif*/
 
-	int Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid) {
-		long ret;
-		return syscall(SYSCALL_SETPGID, &ret, pid, pgid);
-	}
-
-	int Sysdeps<SetSid>::operator()(pid_t *out) {
-		long ret;
-		long error = syscall(SYSCALL_SETSID, &ret);
-		*out = ret;
-		return error;
-	}
-
-	int Sysdeps<FutexTid>::operator()() {
-		long ret;
-		syscall(SYSCALL_GETTID, &ret);
-		return ret;
-	}
-
-	pid_t Sysdeps<GetTid>::operator()() {
-		long ret;
-		syscall(SYSCALL_GETTID, &ret);
-		return ret;
-	}
-
-	#ifndef MLIBC_BUILDING_RTLD
-
-	[[noreturn]] void Sysdeps<ThreadExit>::operator()() {
-		syscall(SYSCALL_THREADEXIT, nullptr);
-		__builtin_unreachable();
-	}
-
-	extern "C" void __mlibc_thread_entry();
-
-	int Sysdeps<Clone>::operator()(void *tcb, pid_t *pid_out, void *stack) {
-		(void)tcb;
-		long ret;
-		long err = syscall(SYSCALL_NEWTHREAD, &ret, (uintptr_t)__mlibc_thread_entry, (uintptr_t)stack);
-		*pid_out = ret;
-		return err;
-	}
-
-	#endif
-
-	int Sysdeps<Listen>::operator()(int fd, int backlog) {
-		long ret;
-		return syscall(SYSCALL_LISTEN, &ret, fd, backlog);
-	}
-
-	int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
-		long ret;
-		long error = syscall(SYSCALL_ACCEPT, &ret, fd, (uint64_t)addr_ptr, (uint64_t)addr_length, flags);
-		*newfd = ret;
-		return error;
-	}
-
-	int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-		long ret;
-		return syscall(SYSCALL_CONNECT, &ret, fd, (uint64_t)addr_ptr, addr_length);
-	}
-
-	int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
-		long ret;
-		long err = syscall(SYSCALL_RECVMSG, &ret, fd, (uint64_t)hdr, flags);
-		*length = ret;
-		return err;
-	}
-
-	int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
-		long ret;
-		return syscall(SYSCALL_SETSOCKOPT, &ret, fd, layer, number, (uint64_t)buffer, size);
-	}
-
-	int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
-		long ret;
-		long err = syscall(SYSCALL_SENDMSG, &ret, fd, (uint64_t)hdr, flags);
-		*length = ret;
-		return err;
-	}
-
-	int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-		long ret;
-		return syscall(SYSCALL_BIND, &ret, fd, (uint64_t)addr_ptr, addr_length);
-	}
-
-	int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
-		long ret;
-		long err = syscall(SYSCALL_SOCKET, &ret, family, type, protocol);
-		*fd = ret;
-		return err;
-	}
-
-	int Sysdeps<Renameat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path) {
-		long ret;
-		return syscall(SYSCALL_RENAMEAT, &ret, olddirfd, (uint64_t)old_path, newdirfd, (uint64_t)new_path);
-	}
-
-	int Sysdeps<Rename>::operator()(const char *path, const char *new_path) {
-		return sysdep<Renameat>(AT_FDCWD, path, AT_FDCWD, new_path);
-	}
-
-	int Sysdeps<Utimensat>::operator()(int dirfd, const char *pathname, const struct timespec times[2], int flags) {
-		long ret;
-		return syscall(SYSCALL_UTIMENSAT, &ret, dirfd, (uint64_t)pathname, (uint64_t)times, flags);
-	}
-
-	int Sysdeps<Fchownat>::operator()(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
-		long ret;
-		return syscall(SYSCALL_FCHOWNAT, &ret, dirfd, (uint64_t)pathname, owner, group, flags);
-	}
-
-	int Sysdeps<Mount>::operator()(const char *source, const char *target, const char *fstype, unsigned long flags, const void *data) {
-		long ret;
-		return syscall(SYSCALL_MOUNT, &ret, (uint64_t)source, (uint64_t)target, (uint64_t)fstype, flags, (uint64_t)data);
-	}
-
-	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
-		long ret;
-		return syscall(SYSCALL_FTRUNCATE, &ret, fd, size);
-	}
-
-	int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
-		struct timespec ts;
-		ts.tv_sec = *secs;
-		ts.tv_nsec = *nanos;
-		long ret;
-		long err = syscall(SYSCALL_NANOSLEEP, &ret, (uintptr_t)&ts, (uintptr_t)&ts);
-		*secs = ts.tv_sec;
-		*nanos = ts.tv_nsec;
-		return err;
-	}
-
-	int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr){
-		int res;
-		return sysdep<Ioctl>(fd, TCGETS, (void *)attr, &res);
-	}
-
-	int Sysdeps<Tcsetattr>::operator()(int fd, int act, const struct termios *attr){
-		(void)act;
-		int res;
-		return sysdep<Ioctl>(fd, TCSETS, (void *)attr, &res);
-	}
-
-	int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
-		long ret;
-		long error = syscall(SYSCALL_POLL, &ret, (uint64_t)fds, count, timeout);
-		*num_events = ret;
-		return error;
-	}
-
-	int Sysdeps<Ppoll>::operator()(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
-		long ret;
-		long error = syscall(SYSCALL_PPOLL, &ret, (uint64_t)fds, nfds, (uint64_t)timeout, (uint64_t)sigmask);
-		*num_events = ret;
-		return error;
-	}
-
-#ifndef MLIBC_BUILDING_RTLD
+/*#ifndef MLIBC_BUILDING_RTLD
 	int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set, fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
 		pollfd *fds = (pollfd *)malloc(num_fds * sizeof(pollfd));
 
@@ -644,292 +1112,5 @@ namespace mlibc {
 		free(fds);
 		return 0;
 	}
-#endif
-
-	int Sysdeps<Umask>::operator()(mode_t mode, mode_t *old) {
-		long ret;
-		long error = syscall(SYSCALL_UMASK, &ret, mode);
-		*old = ret;
-		return error;
-	}
-
-	int Sysdeps<Fchmod>::operator()(int fd, mode_t mode) {
-		long ret;
-		return syscall(SYSCALL_FCHMOD, &ret, fd, mode);
-	}
-
-	int Sysdeps<Fchmodat>::operator()(int fd, const char *pathname, mode_t mode, int flags) {
-		long ret;
-		return syscall(SYSCALL_FCHMODAT, &ret, fd, (uint64_t)pathname, mode, flags);
-	}
-
-	int Sysdeps<Chmod>::operator()(const char *pathname, mode_t mode) {
-		return sysdep<Fchmodat>(AT_FDCWD, pathname, mode, 0);
-	}
-
-	int Sysdeps<Readlinkat>::operator()(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length) {
-		long ret;
-		long error = syscall(SYSCALL_READLINKAT, &ret, dirfd, (uint64_t)path, (uint64_t)buffer, max_size);
-		*length = ret;
-		return error;
-	}
-
-	int Sysdeps<Readlink>::operator()(const char *path, void *buffer, size_t max_size, ssize_t *length) {
-		return sysdep<Readlinkat>(AT_FDCWD, path, buffer, max_size, length);
-	}
-
-	static int dolink(int oldfd, const char *oldpath, int newfd, const char *newpath, int flags, int type) {
-		long ret;
-		return syscall(SYSCALL_LINKAT, &ret, oldfd, (uint64_t)oldpath, newfd, (uint64_t)newpath, flags, type);
-	}
-
-	int Sysdeps<Linkat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {
-		return dolink(olddirfd, old_path, newdirfd, new_path, flags, 0);
-	}
-
-	int Sysdeps<Link>::operator()(const char *old_path, const char *new_path) {
-		return sysdep<Linkat>(AT_FDCWD, old_path, AT_FDCWD, new_path, 0);
-	}
-
-	int Sysdeps<Symlinkat>::operator()(const char *target_path, int dirfd, const char *link_path) {
-		return dolink(AT_FDCWD, target_path, dirfd, link_path, 0, 1);
-	}
-
-	int Sysdeps<Symlink>::operator()(const char *target_path, const char *link_path) {
-		return sysdep<Symlinkat>(target_path, AT_FDCWD, link_path);
-	}
-
-	int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
-		long ret;
-		return syscall(SYSCALL_MKDIRAT, &ret, dirfd, (uint64_t)path, mode);
-	}
-
-	int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
-		return sysdep<Mkdirat>(AT_FDCWD, path, mode);
-	}
-
-	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
-		long ret;
-		long err = syscall(SYSCALL_IOCTL, &ret, fd, request, (uint64_t)arg);
-		*result = ret;
-		return err;
-	}
-
-	int Sysdeps<Unlinkat>::operator()(int fd, const char *path, int flags) {
-		long ret;
-		return syscall(SYSCALL_UNLINKAT, &ret, fd, (uint64_t)path, flags);
-	}
-
-	int Sysdeps<Faccessat>::operator()(int dirfd, const char *pathname, int mode, int flags){
-		long ret;
-		return syscall(SYSCALL_FACCESSAT, &ret, dirfd, (uint64_t)pathname, mode, flags);
-	}
-
-	int Sysdeps<Access>::operator()(const char *path, int mode){
-		return sysdep<Faccessat>(AT_FDCWD, path, mode, 0);
-	}
-
-	int Sysdeps<Pipe>::operator()(int *fds, int flags) {
-		long ret = 0;
-		long err = syscall(SYSCALL_PIPE2, &ret, flags);
-		if(err)
-			return err;
-
-		fds[0] = ret & 0xffffffff;
-		fds[1] = (ret >> 32) & 0xffffffff;
-		return err;
-	}
-
-	int Sysdeps<Chdir>::operator()(const char *path) {
-		long ret;
-		return syscall(SYSCALL_CHDIR, &ret, (uint64_t)path);
-	}
-
-	int Sysdeps<Fchdir>::operator()(int fd) {
-		long ret;
-		return syscall(SYSCALL_FCHDIR, &ret, fd);
-	}
-
-	int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
-		long arg = va_arg(args, uint64_t);
-		long ret;
-		long err = syscall(SYSCALL_FCNTL, &ret, fd, request, arg);
-		*result = ret;
-		return err;
-	}
-
-	int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
-		(void)flags;
-		long ret;
-		long err = syscall(SYSCALL_DUP, &ret, fd);
-		*newfd = ret;
-		return err;
-	}
-
-	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
-		(void)flags;
-		long ret;
-		return syscall(SYSCALL_DUP2, &ret, fd, newfd);
-	}
-
-	int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
-		long ret;
-		long err = syscall(SYSCALL_GETDENTS, &ret, handle, (uint64_t)buffer, max_size);
-		if(err)
-			return err;
-		*bytes_read = ret;
-		return err;
-	}
-
-	int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
-		(void)ru;
-		long ret;
-		long err = syscall(SYSCALL_WAITPID, &ret, pid, (uint64_t)status, flags);
-		*ret_pid = ret;
-		return err;
-	}
-
-	int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
-		long ret;
-		return syscall(SYSCALL_EXECVE, &ret, (uint64_t)path, (uint64_t)argv, (uint64_t)envp);
-	}
-
-	int Sysdeps<Fork>::operator()(pid_t *pid) {
-		long ret = 0;
-		long error = syscall(SYSCALL_FORK, &ret);
-		*pid = ret;
-		return error;
-	}
-
-	int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
-		long ret;
-		switch (fsfdt) {
-			case fsfd_target::path:
-				return syscall(SYSCALL_FSTATAT, &ret, AT_FDCWD, (uint64_t)path, (uint64_t)statbuf, flags);
-			case fsfd_target::fd:
-				return syscall(SYSCALL_FSTAT, &ret, fd, (uint64_t)statbuf);
-			case fsfd_target::fd_path:
-				return syscall(SYSCALL_FSTATAT, &ret, fd, (uint64_t)path, (uint64_t)statbuf, flags);
-			default:
-				mlibc::infoLogger() << "mlibc: stat: Unknown fsfd_target: " << (int)fsfdt << frg::endlog;
-				return ENOSYS;
-		}
-	}
-
-	pid_t Sysdeps<GetPid>::operator()() {
-		long ret;
-		syscall(SYSCALL_GETPID, &ret);
-		return ret;
-	}
-
-	void Sysdeps<LibcLog>::operator()(const char *message) {
-		long ret;
-		syscall(SYSCALL_PRINT, &ret, (uint64_t)message);
-	}
-
-	[[noreturn]] void Sysdeps<LibcPanic>::operator()() {
-		sysdep<LibcLog>("mlibc: panic");
-		sysdep<Exit>(1);
-	}
-
-	[[noreturn]] void Sysdeps<Exit>::operator()(int status) {
-		syscall(SYSCALL_EXIT, NULL, status);
-		__builtin_unreachable();
-	}
-
-	int Sysdeps<TcbSet>::operator()(void *pointer) {
-		long r;
-		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, (uint64_t)pointer);
-	}
-
-	#define FUTEX_WAIT 0
-	#define FUTEX_WAKE 1
-
-	int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
-		long ret;
-		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAIT, expected, (uint64_t)time);
-	}
-
-	int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
-		long ret;
-		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAKE, all ? INT_MAX : 1, 0);
-	}
-
-	int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
-		size += 4096 - (size % 4096);
-		return sysdep<VmMap>(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, 0, pointer);
-	}
-	int Sysdeps<AnonFree>::operator()(void *pointer, size_t size) {
-		size += 4096 - (size % 4096);
-		return sysdep<VmUnmap>(pointer, size);
-	}
-
-	int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t mode, int *fd) {
-		long ret;
-		long err = syscall(SYSCALL_OPENAT, &ret, dirfd, (uint64_t)path, flags, mode);
-		if(err)
-			return err;
-		*fd = ret;
-		return 0;
-	}
-
-	int Sysdeps<Open>::operator()(const char *pathname, int flags, mode_t mode, int *fd) {
-		return sysdep<Openat>(AT_FDCWD, pathname, flags, mode, fd);
-	};
-
-	int Sysdeps<OpenDir>::operator()(const char *path, int *handle) {
-		return sysdep<Open>(path, O_DIRECTORY, 0, handle);
-	}
-
-	int Sysdeps<Read>::operator()(int fd, void *buff, size_t count, ssize_t *bytes_read) {
-		long readc;
-		long error = syscall(SYSCALL_READ, &readc, fd, (uint64_t)buff, count);
-		*bytes_read = readc;
-		return error;
-	}
-
-	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
-		long writec;
-		long error = syscall(SYSCALL_WRITE, &writec, fd, (uint64_t)buff, count);
-		*bytes_written = writec;
-		return error;
-	}
-
-	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
-		long ret = 0;
-		long error = syscall(SYSCALL_SEEK, &ret, fd, offset, whence);
-		*new_offset = ret;
-		return error;
-	}
-
-	int Sysdeps<Close>::operator()(int fd) {
-		long r;
-		return syscall(SYSCALL_CLOSE, &r, fd);
-	}
-
-	int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
-		long ret;
-		long err = syscall(SYSCALL_MMAP, &ret, (uint64_t)hint, size, prot, flags, fd, offset);
-		*window = (void *)ret;
-		return err;
-	}
-
-	int Sysdeps<VmUnmap>::operator()(void *pointer, size_t size) {
-		long ret;
-		return syscall(SYSCALL_MUNMAP, &ret, (uintptr_t)pointer, size);
-	}
-
-	int Sysdeps<Isatty>::operator()(int fd) {
-		long ret;
-		return syscall(SYSCALL_ISATTY, &ret, fd);
-	}
-
-	int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
-		struct timespec ts;
-		long ret;
-		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, (uint64_t)&ts);
-		*secs = ts.tv_sec;
-		*nanos = ts.tv_nsec;
-		return err;
-	}
+#endif*/
 } // namespace mlibc
