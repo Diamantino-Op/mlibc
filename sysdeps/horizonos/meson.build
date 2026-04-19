@@ -40,6 +40,7 @@ if not no_headers
 		'include/abi-bits/blksize_t.h',
 		'include/abi-bits/dev_t.h',
 		'include/abi-bits/gid_t.h',
+		'include/abi-bits/hos_msg.h',
 		'include/abi-bits/ino_t.h',
 		'include/abi-bits/mode_t.h',
 		'include/abi-bits/nlink_t.h',
@@ -86,6 +87,7 @@ if not no_headers
         install_headers(
                 'include/horizonos/syscall.h',
                 'include/horizonos/archctl.h',
+				'generic/generic.h',
                 subdir: 'horizonos',
                 follow_symlinks: true,
         )

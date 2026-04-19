@@ -1,6 +1,7 @@
 #include <bits/ensure.h>
 #include <mlibc/debug.hpp>
 #include <mlibc/all-sysdeps.hpp>
+#include "generic.h"
 #include <errno.h>
 #include <horizonos/syscall.h>
 #include <horizonos/archctl.h>
@@ -14,7 +15,35 @@
 #include <unistd.h>
 #include <dirent.h>
 
+int register_horizonos_port(int port) {
+	long ret;
+	return syscall(SYSCALL_PORTREGISTER, &ret, port);
+}
+
+int send_horizonos_message(int port, const struct hos_msg *hdr) {
+	long ret;
+	return syscall(SYSCALL_SENDMSG, &ret, port, (uint64_t)hdr);
+}
+
+int receive_horizonos_message(int port, struct hos_msg *hdr) {
+	long ret;
+	return syscall(SYSCALL_RECVMSG, &ret, port, (uint64_t)hdr);
+}
+
+int is_thread_alive(int tid, bool *alive) {
+	long ret;
+	int err = syscall(SYSCALL_ISTHREADALIVE, &ret, tid);
+	*alive = ret != 0;
+	
+	return err;
+}
+
 namespace mlibc {
+	[[noreturn]] static void panic_unimplemented_sysdep(const char *name) {
+		mlibc::panicLogger() << "mlibc: unimplemented sysdep " << name << frg::endlog;
+		__builtin_trap();
+	}
+
 	// Print
 
 	void Sysdeps<LibcLog>::operator()(const char *message) {
@@ -113,6 +142,8 @@ namespace mlibc {
 		return syscall(SYSCALL_PAUSE, &ret);
 	}
 
+	// Messages
+
 	int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
 		/*struct timespec ts;
 		ts.tv_sec = *secs;
@@ -125,17 +156,32 @@ namespace mlibc {
 
 		(void)secs;
 		(void)nanos;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	pid_t Sysdeps<GetPid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Kill>::operator()(pid_t pid, int signal) {
 		(void)pid;
 		(void)signal;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
+	}
+
+	// Futex
+
+	#define FUTEX_WAIT 0
+	#define FUTEX_WAKE 1
+
+	int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
+		long ret;
+		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAIT, expected, (uint64_t)time);
+	}
+
+	int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
+		long ret;
+		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAKE, all ? INT_MAX : 1, 0);
 	}
 
 #ifndef MLIBC_BUILDING_RTLD
@@ -201,21 +247,21 @@ namespace mlibc {
 		(void)sig;
 		(void)act;
 		(void)oldact;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 #endif
 
 	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
 		(void)size;
 		(void)list;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetGroups>::operator()(size_t size, gid_t *list, int *ret) {
 		(void)size;
 		(void)list;
-		*ret = 0;
-		return 0;
+		(void)ret;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number, void *__restrict buffer, socklen_t *__restrict size) {
@@ -224,13 +270,13 @@ namespace mlibc {
 		(void)number;
 		(void)buffer;
 		(void)size;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<InetConfigured>::operator()(bool *ipv4, bool *ipv6) {
 		(void)ipv4;
 		(void)ipv6;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Readv>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
@@ -238,7 +284,7 @@ namespace mlibc {
 		(void)iovs;
 		(void)iovc;
 		(void)bytes_read;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
@@ -246,30 +292,30 @@ namespace mlibc {
 		(void)iovs;
 		(void)iovc;
 		(void)bytes_written;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Flock>::operator()(int fd, int options) {
 		(void)fd;
 		(void)options;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Nice>::operator()(int nice, int *ret) {
 		(void)nice;
-		*ret = 0;
-		return 0;
+		(void)ret;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
 		(void)sockfd;
 		(void)how;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sigpending>::operator()(sigset_t *set) {
 		(void)set;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sigtimedwait>::operator()(const sigset_t *__restrict set, siginfo_t *__restrict info, const struct timespec *__restrict timeout, int *out_signal) {
@@ -277,76 +323,76 @@ namespace mlibc {
 		(void)info;
 		(void)timeout;
 		(void)out_signal;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
 		(void)set;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetUid>::operator()(uid_t id) {
 		(void)id;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetGid>::operator()(gid_t id) {
 		(void)id;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetEuid>::operator()(uid_t id) {
 		(void)id;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetEgid>::operator()(gid_t id) {
 		(void)id;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	uid_t Sysdeps<GetUid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	uid_t Sysdeps<GetEuid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	gid_t Sysdeps<GetGid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	gid_t Sysdeps<GetEgid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
 		(void)_ruid;
 		(void)_euid;
 		(void)_suid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
 		(void)_rgid;
 		(void)_egid;
 		(void)_sgid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
 		(void)ruid;
 		(void)euid;
 		(void)suid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
 		(void)rgid;
 		(void)egid;
 		(void)sgid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Mknodat>::operator()(int dirfd, const char *path, int mode, int dev) {
@@ -354,14 +400,14 @@ namespace mlibc {
 		(void)path;
 		(void)mode;
 		(void)dev;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Mkfifoat>::operator()(int dirfd, const char *path, mode_t mode) {
 		(void)dirfd;
 		(void)path;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
@@ -370,7 +416,7 @@ namespace mlibc {
 		(void)n;
 		(void)off;
 		(void)bytes_read;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Pwrite>::operator()(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_written) {
@@ -379,12 +425,12 @@ namespace mlibc {
 		(void)n;
 		(void)off;
 		(void)bytes_written;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Chroot>::operator()(const char *path) {
 		(void)path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Peername>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
@@ -392,7 +438,7 @@ namespace mlibc {
 		(void)addr_ptr;
 		(void)max_addr_length;
 		(void)actual_length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sockname>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
@@ -400,7 +446,7 @@ namespace mlibc {
 		(void)addr_ptr;
 		(void)max_addr_length;
 		(void)actual_length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Socketpair>::operator()(int domain, int type_and_flags, int proto, int *fds) {
@@ -408,89 +454,90 @@ namespace mlibc {
 		(void)type_and_flags;
 		(void)proto;
 		(void)fds;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
 		(void)which;
 		(void)curr_value;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
 		(void)which;
 		(void)new_value;
 		(void)old_value;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fsync>::operator()(int fd) {
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fdatasync>::operator()(int fd) {
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	pid_t Sysdeps<GetPpid>::operator()() {
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
 		(void)pid;
 		(void)pgid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
 		(void)pid;
 		(void)pgid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
 		(void)buffer;
 		(void)bufsize;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
 		(void)buffer;
 		(void)bufsize;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Uname>::operator()(struct utsname *buf) {
 		(void)buf;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	void Sysdeps<Sync>::operator()() {
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
 		(void)ss;
 		(void)oss;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid) {
 		(void)pid;
 		(void)pgid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetSid>::operator()(pid_t *out) {
 		(void)out;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Listen>::operator()(int fd, int backlog) {
 		(void)fd;
 		(void)backlog;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
@@ -499,14 +546,14 @@ namespace mlibc {
 		(void)addr_ptr;
 		(void)addr_length;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
 		(void)fd;
 		(void)addr_ptr;
 		(void)addr_length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
@@ -514,7 +561,7 @@ namespace mlibc {
 		(void)hdr;
 		(void)flags;
 		(void)length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
@@ -523,7 +570,7 @@ namespace mlibc {
 		(void)number;
 		(void)buffer;
 		(void)size;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
@@ -531,14 +578,14 @@ namespace mlibc {
 		(void)hdr;
 		(void)flags;
 		(void)length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
 		(void)fd;
 		(void)addr_ptr;
 		(void)addr_length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
@@ -546,7 +593,7 @@ namespace mlibc {
 		(void)type;
 		(void)protocol;
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Utimensat>::operator()(int dirfd, const char *pathname, const struct timespec times[2], int flags) {
@@ -554,7 +601,7 @@ namespace mlibc {
 		(void)pathname;
 		(void)times;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fchownat>::operator()(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
@@ -563,26 +610,26 @@ namespace mlibc {
 		(void)owner;
 		(void)group;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
 		(void)fd;
 		(void)size;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
 		(void)fd;
 		(void)attr;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Tcsetattr>::operator()(int fd, int act, const struct termios *attr) {
 		(void)fd;
 		(void)act;
 		(void)attr;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
@@ -590,7 +637,7 @@ namespace mlibc {
 		(void)count;
 		(void)timeout;
 		(void)num_events;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Ppoll>::operator()(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
@@ -599,7 +646,7 @@ namespace mlibc {
 		(void)timeout;
 		(void)sigmask;
 		(void)num_events;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set, fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
@@ -610,19 +657,19 @@ namespace mlibc {
 		(void)timeout;
 		(void)sigmask;
 		(void)num_events;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Umask>::operator()(mode_t mode, mode_t *old) {
 		(void)mode;
 		(void)old;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fchmod>::operator()(int fd, mode_t mode) {
 		(void)fd;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fchmodat>::operator()(int fd, const char *pathname, mode_t mode, int flags) {
@@ -630,13 +677,13 @@ namespace mlibc {
 		(void)pathname;
 		(void)mode;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Chmod>::operator()(const char *pathname, mode_t mode) {
 		(void)pathname;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Readlinkat>::operator()(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length) {
@@ -645,7 +692,7 @@ namespace mlibc {
 		(void)buffer;
 		(void)max_size;
 		(void)length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Readlink>::operator()(const char *path, void *buffer, size_t max_size, ssize_t *length) {
@@ -653,7 +700,7 @@ namespace mlibc {
 		(void)buffer;
 		(void)max_size;
 		(void)length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Linkat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {
@@ -662,39 +709,39 @@ namespace mlibc {
 		(void)newdirfd;
 		(void)new_path;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Link>::operator()(const char *old_path, const char *new_path) {
 		(void)old_path;
 		(void)new_path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Symlinkat>::operator()(const char *target_path, int dirfd, const char *link_path) {
 		(void)target_path;
 		(void)dirfd;
 		(void)link_path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Symlink>::operator()(const char *target_path, const char *link_path) {
 		(void)target_path;
 		(void)link_path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
 		(void)dirfd;
 		(void)path;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
 		(void)path;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Faccessat>::operator()(int dirfd, const char *pathname, int mode, int flags) {
@@ -702,43 +749,43 @@ namespace mlibc {
 		(void)pathname;
 		(void)mode;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Access>::operator()(const char *path, int mode) {
 		(void)path;
 		(void)mode;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Pipe>::operator()(int *fds, int flags) {
 		(void)fds;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Chdir>::operator()(const char *path) {
 		(void)path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fchdir>::operator()(int fd) {
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
 		(void)fd;
 		(void)flags;
 		(void)newfd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
 		(void)path;
 		(void)argv;
 		(void)envp;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<OpenDir>::operator()(const char *path, int *handle) {
@@ -750,14 +797,14 @@ namespace mlibc {
 		(void)buffer;
 		(void)max_size;
 		(void)bytes_read;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
 		(void)how;
 		(void)set;
 		(void)retrieve;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
@@ -766,7 +813,7 @@ namespace mlibc {
 		(void)path;
 		(void)flags;
 		(void)statbuf;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Rmdir>::operator()(const char *path) {
@@ -777,7 +824,7 @@ namespace mlibc {
 		(void)fd;
 		(void)path;
 		(void)flags;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Rename>::operator()(const char *path, const char *new_path) {
@@ -789,12 +836,12 @@ namespace mlibc {
 		(void)old_path;
 		(void)newdirfd;
 		(void)new_path;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Isatty>::operator()(int fd) {
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
@@ -802,7 +849,7 @@ namespace mlibc {
 		(void)request;
 		(void)args;
 		(void)result;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t mode, int *fd) {
@@ -811,12 +858,12 @@ namespace mlibc {
 		(void)flags;
 		(void)mode;
 		(void)fd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Fork>::operator()(pid_t *pid) {
 		(void)pid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
@@ -825,14 +872,14 @@ namespace mlibc {
 		(void)flags;
 		(void)ru;
 		(void)ret_pid;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 		(void)fd;
 		(void)flags;
 		(void)newfd;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 #ifndef MLIBC_BUILDING_RTLD
@@ -860,7 +907,7 @@ namespace mlibc {
 		(void)fstype;
 		(void)flags;
 		(void)data;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
@@ -868,27 +915,14 @@ namespace mlibc {
 		(void)request;
 		(void)arg;
 		(void)result;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
 		(void)pointer;
 		(void)size;
 		(void)prot;
-		return 0;
-	}
-
-	int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
-		(void)pointer;
-		(void)expected;
-		(void)time;
-		return 0;
-	}
-
-	int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
-		(void)pointer;
-		(void)all;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Open>::operator()(const char *pathname, int flags, mode_t mode, int *fd) {
@@ -898,7 +932,7 @@ namespace mlibc {
 
 		if(fd)
 			*fd = -1;
-		return ENOSYS;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	};
 
 	int Sysdeps<Read>::operator()(int fd, void *buff, size_t count, ssize_t *bytes_read) {
@@ -908,7 +942,7 @@ namespace mlibc {
 
 		if(bytes_read)
 			*bytes_read = 0;
-		return ENOSYS;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
@@ -938,7 +972,7 @@ namespace mlibc {
 			return 0;
 		}
 
-		return ENOSYS;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
@@ -954,21 +988,21 @@ namespace mlibc {
 	int Sysdeps<Close>::operator()(int fd) {
 		if(fd >= 0 && fd <= 2)
 			return 0;
-		return ENOSYS;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Ttyname>::operator()(int fd, char *buffer, size_t size) {
 		(void)fd;
 		(void)buffer;
 		(void)size;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 	int Sysdeps<Ptsname>::operator()(int fd, char *buffer, size_t length) {
 		(void)fd;
 		(void)buffer;
 		(void)length;
-		return 0;
+		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
 /*#ifndef MLIBC_BUILDING_RTLD
@@ -1114,3 +1148,4 @@ namespace mlibc {
 	}
 #endif*/
 } // namespace mlibc
+
