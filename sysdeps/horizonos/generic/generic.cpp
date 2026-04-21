@@ -945,6 +945,8 @@ namespace mlibc {
 		panic_unimplemented_sysdep("horizonos sysdep stub");
 	}
 
+	// TODO
+
 	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
 		if(bytes_written)
 			*bytes_written = 0;
@@ -971,8 +973,8 @@ namespace mlibc {
 				*bytes_written = static_cast<ssize_t>(written);
 			return 0;
 		}
-
-		panic_unimplemented_sysdep("horizonos sysdep stub");
+		
+		return 0;
 	}
 
 	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
