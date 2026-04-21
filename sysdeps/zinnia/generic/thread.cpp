@@ -1,17 +1,21 @@
 #include <errno.h>
-#include <zinnia/syscall.hpp>
 #include <mlibc/all-sysdeps.hpp>
 #include <mlibc/arch-defs.hpp>
 #include <mlibc/tcb.hpp>
 #include <sys/mman.h>
+#include <zinnia/syscall.hpp>
 
 extern "C" void __mlibc_enter_thread(void *entry, void *user_arg, Tcb *tcb) {
-	while (__atomic_load_n(&tcb->tid, __ATOMIC_RELAXED) == 0) {
+	if (mlibc::sysdep<TcbSet>(tcb))
+		__ensure(!"failed to set tcb for new thread");
+
+	while (__atomic_load_n(&tcb->tid, __ATOMIC_RELAXED) == 0)
 		mlibc::sysdep<FutexWait>(&tcb->tid, 0, nullptr);
-	}
+
+	// Enable cancellation once the TCB is up
+	__atomic_fetch_or(&tcb->cancelBits, tcbCancelEnableBit, __ATOMIC_RELAXED);
 
 	tcb->invokeThreadFunc(entry, user_arg);
-
 	mlibc::thread_exit(tcb->returnValue);
 }
 

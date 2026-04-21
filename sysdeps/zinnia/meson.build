@@ -15,9 +15,11 @@ libc_sources += files(
 	'generic/posix.cpp',
 	'generic/thread.cpp',
 	'generic/mntent.cpp',
+	'generic/module.cpp',
 	'generic/mount.cpp',
 	'generic/reboot.cpp',
 	host_machine.cpu_family() / 'thread.S',
+	host_machine.cpu_family() / 'signal.S',
 )
 
 if not no_headers
@@ -88,6 +90,7 @@ if not no_headers
 	install_headers(
 		'include/sys/sysmacros.h',
 		'include/sys/ioccom.h',
+		'include/sys/module.h',
 		'include/sys/mount.h',
 		'include/sys/reboot.h',
 		subdir: 'sys',
