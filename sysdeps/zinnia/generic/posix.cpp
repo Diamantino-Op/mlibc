@@ -64,12 +64,25 @@ Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size
 	return 0;
 }
 
-int Sysdeps<Write>::operator()(int fd, const void *buf, size_t count, ssize_t *bytes_written) {
-	auto r = zinnia_syscall(SYSCALL_WRITE, fd, (size_t)buf, count);
+int
+Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
+	if (iovc < 0)
+		return EINVAL;
+	if (iovc == 0) {
+		*bytes_written = 0;
+		return 0;
+	}
+
+	auto r = zinnia_syscall(SYSCALL_WRITEV, fd, (uint64_t)iovs, (size_t)iovc);
 	if (r.error)
 		return r.error;
 	*bytes_written = r.value;
 	return 0;
+}
+
+int Sysdeps<Write>::operator()(int fd, const void *buf, size_t count, ssize_t *bytes_written) {
+	const struct iovec iov = {const_cast<void *>(buf), count};
+	return sysdep<Writev>(fd, &iov, 1, bytes_written);
 }
 
 int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
@@ -535,7 +548,7 @@ int Sysdeps<Fchmod>::operator()(int fd, mode_t mode) {
 }
 
 int Sysdeps<Fchmodat>::operator()(int fd, const char *pathname, mode_t mode, int flags) {
-	return zinnia_syscall(SYSCALL_FCHMOD, fd, (size_t)pathname, mode, flags).error;
+	return zinnia_syscall(SYSCALL_FCHMODAT, fd, (size_t)pathname, mode, flags).error;
 }
 
 int Sysdeps<Utimensat>::operator()(
@@ -628,9 +641,16 @@ int Sysdeps<Sigprocmask>::operator()(
 	return zinnia_syscall(SYSCALL_SIGPROCMASK, how, (size_t)set, (size_t)retrieve).error;
 }
 
+extern "C" void __mlibc_restorer();
+
 int Sysdeps<Sigaction>::operator()(
     int sig, const struct sigaction *__restrict act, struct sigaction *__restrict oact
 ) {
+	if (act && !act->sa_restorer) {
+		struct sigaction modified = *act;
+		modified.sa_restorer = __mlibc_restorer;
+		return zinnia_syscall(SYSCALL_SIGACTION, sig, (size_t)&modified, (size_t)oact).error;
+	}
 	return zinnia_syscall(SYSCALL_SIGACTION, sig, (size_t)act, (size_t)oact).error;
 }
 
