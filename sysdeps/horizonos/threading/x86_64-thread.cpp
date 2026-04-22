@@ -9,8 +9,8 @@ extern "C" void __mlibc_thread_trampoline(void *(*fn)(void *), Tcb *tcb, void *a
 	if(mlibc::sysdep<TcbSet>(tcb))
 		__ensure(!"failed to set tcb for new thread");
 
-	while(__atomic_load_n(&tcb->tid, __ATOMIC_RELAXED) == 0)
-		mlibc::sysdep<FutexWait>(&tcb->tid, 0, nullptr);
+	__atomic_store_n(&tcb->tid, mlibc::sysdep<FutexTid>(), __ATOMIC_RELAXED);
+	__atomic_fetch_or(&tcb->cancelBits, tcbCancelEnableBit, __ATOMIC_RELAXED);
 
 	tcb->invokeThreadFunc(reinterpret_cast<void *>(fn), arg);
 
@@ -29,23 +29,29 @@ namespace mlibc {
 		size_t *guard_size,
 		void **stack_base
 	) {
-		// TODO guard
-
-		mlibc::infoLogger() << "mlibc: sys_prepare_stack() does not setup a guard!" << frg::endlog;
-
-		*guard_size = 0;
-
-		*stack_size = *stack_size ? *stack_size : DEFAULT_STACK;
+		const size_t pageSize = 4096;
+		*stack_size = *stack_size ? (*stack_size + pageSize - 1) & ~(pageSize - 1) : DEFAULT_STACK;
 
 		if(!*stack) {
-			*stack_base = mmap(NULL, *stack_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+			*guard_size = pageSize;
+
+			const size_t totalSize = *stack_size + *guard_size;
+			*stack_base = mmap(NULL, totalSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 			if(*stack_base == MAP_FAILED)
 				return errno;
-		} else {
-			*stack_base = *stack;
-		}
 
-		*stack = (void *)((char *)*stack_base + *stack_size);
+			if(mprotect(*stack_base, *guard_size, PROT_NONE)) {
+				int err = errno;
+				munmap(*stack_base, totalSize);
+				return err;
+			}
+
+			*stack = (void *)((char *)*stack_base + totalSize);
+		} else {
+			*guard_size = 0;
+			*stack_base = *stack;
+			*stack = (void *)((char *)*stack_base + *stack_size);
+		}
 
 		void **stack_it = (void **)*stack;
 

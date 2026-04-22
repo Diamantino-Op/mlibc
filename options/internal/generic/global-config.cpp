@@ -1,6 +1,11 @@
 #include <stdlib.h>
-#include <string.h>
 #include <mlibc/global-config.hpp>
+
+namespace {
+
+mlibc::GlobalConfig globalConfigInstance;
+
+} // namespace
 
 namespace mlibc {
 
@@ -12,7 +17,7 @@ GlobalConfigGuard guard;
 
 GlobalConfigGuard::GlobalConfigGuard() {
 	// Force the config to be created during initialization of libc.so.
-	mlibc::globalConfig();
+    globalConfigInstance = {};
 }
 
 static bool envEnabled(const char *env) {
@@ -27,6 +32,10 @@ GlobalConfig::GlobalConfig() {
 	debugPthreadTrace = envEnabled("MLIBC_DEBUG_PTHREAD_TRACE");
 	debugPathResolution = envEnabled("MLIBC_DEBUG_PATH_RESOLUTION");
 	debugMonetaryLengths = envEnabled("MLIBC_DEBUG_MONETARY_LENGTHS");
+}
+
+const GlobalConfig &globalConfig() {
+    return globalConfigInstance;
 }
 
 } // namespace mlibc
