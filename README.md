@@ -26,10 +26,7 @@ Individual operating systems can opt in or out of certain features as desired; f
 
 ## Porting mlibc to a new OS
 
-Ports to new OSes are welcome. To port mlibc to another OS, the following changes need to be made:
-1. Add new `sysdeps/` subdirectory `sysdeps/some-new-os/` and a `meson.build` to compile it. Integrate `sysdeps/some-new-os/meson.build` into the toplevel `meson.build`.
-2. Create ABI headers in `abis/some-new-os/`. Add symlinks in `sysdeps/some-new-os/include/abi-bits` to your ABI headers. Look at existing ports to figure out the ABI headers required for the options enabled by `sysdeps/some-new-os/meson.build`.
-3. In `sysdeps/some-new-os/`, add code to implement (a subset of) the functions from `options/internal/include/mlibc/internal-sysdeps.hpp`. Which subset you need depends on the options that `sysdeps/some-new-os/meson.build` enables.
+Ports to new OSes are welcome. To port mlibc to another OS, please follow the [mlibc User Guide](https://docs.managarm.org/mlibc-book/).
 
 We recommend that new ports do not build from `master` as we occasionally make internal changes that cause out-of-tree sysdeps to break. Instead we recommend you pin a specific release (or commit), or to upstream your changes to this repository so that we can build them on our CI and thus any breakages will be fixed by us in-tree.
 
@@ -61,6 +58,9 @@ A convenience script is provided to download and install the Linux kernel header
 ```
 ./scripts/get-linux-headers.sh
 ```
+
+You will also need `pyexpect` and the following locales installed: `de_DE de_DE.utf8 ru_RU.utf8 en_US.utf8 C.utf8`
+
 Then run from the project root:
 ```
 meson setup -Dbuild_tests=true -Dlinux_kernel_headers=./linux-headers build

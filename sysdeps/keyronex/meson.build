@@ -5,7 +5,6 @@ sysdep_supported_options = {
 	'bsd': true,
 }
 
-
 rtld_sources += files(
 	'generic/generic.cpp'
 )
@@ -13,11 +12,12 @@ rtld_sources += files(
 libc_sources += files(
 	'generic/entry.cpp',
 	'generic/generic.cpp',
-	'generic/linux.cpp',
-	'generic/signal.cpp',
 	'generic/socket.cpp',
+	'generic/poll.cpp',
+	'generic/process.cpp',
+	'generic/signal.cpp',
 	'generic/thread.cpp',
-	'generic/thread.S'
+	host_machine.cpu_family() / 'thread.S'
 )
 
 if not no_headers
@@ -75,6 +75,10 @@ if not no_headers
 		'include/abi-bits/fd_set.h',
 		'include/abi-bits/sem.h',
 		'include/abi-bits/route.h',
+		'include/abi-bits/sa_family_t.h',
+		'include/abi-bits/sockaddr_storage.h',
+		'include/abi-bits/sig-limits.h',
+		'include/abi-bits/sigset_t.h',
 		subdir: 'abi-bits',
 		follow_symlinks: true
 	)
@@ -103,6 +107,15 @@ if not headers_only
 		install_dir: get_option('libdir')
 	)
 
+	crt = custom_target('crt1',
+		build_by_default: true,
+		command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
+		input: host_machine.cpu_family() / 'crt-src/crt0.S',
+		output: 'crt1.o',
+		install: true,
+		install_dir: get_option('libdir')
+	)
+
 	custom_target('crti',
 		build_by_default: true,
 		command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
@@ -121,4 +134,3 @@ if not headers_only
 		install_dir: get_option('libdir')
 	)
 endif
-

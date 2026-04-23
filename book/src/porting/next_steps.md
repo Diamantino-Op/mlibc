@@ -2,24 +2,31 @@
 
 ## Dynamic linking
 
-So far you have compiled and run a statically linked executable. If you desire dynamic linking, it is not much more work in mlibc compared to static linking. 
+So far you have compiled and run a statically linked executable. If you desire dynamic linking, it is not much more work in mlibc compared to static linking.
 
 To get it to work, you will need to reconfigure mlibc without the `-Ddefault_library=static` option, load *both* the ELF and its interpreter (stored in `PT_INTERP`), and jump to the *interpreter's* entry point.
 
 ## Implementing more sysdeps
 
-Most sysdeps in mlibc are defined as weak symbols, and so do not need to be defined right away. Whenever an unimplemented sysdep is hit, mlibc will log about it and return an error to the user application.
+Most sysdeps in mlibc are optional, and so do not need to be defined right away. Whenever an unimplemented sysdep is hit, mlibc will log about it and return an error to the user application (typically ENOSYS).
 
-The list of sysdeps for every option can be found under its include directory. For example, the sysdeps for the POSIX option are declared in `options/posix/include/mlibc/posix-sysdeps.hpp`. As mentioned earlier, make sure your definitions match the ones in the header, as mlibc won't be able to find them otherwise.
+The list of sysdeps can be found in the [`options/internal/include/mlibc/sysdep-signatures.hpp`](https://github.com/managarm/mlibc/blob/master/options/internal/include/mlibc/sysdep-signatures.hpp) header. As mentioned earlier, make sure your definitions match the ones in the header, as mismatches will cause compilation or linking errors.
 
 ## Enabling more options
 
-For the demo sysdeps, only the bare minimum is enabled. However, most software you would want to port over will need more options enabled. The toggleable options in mlibc are:
+For the demo sysdeps, only the POSIX option is enabled. However, there are ports that will need more options enabled. The other toggleable options in mlibc are:
 
-- POSIX option, for APIs defined by posix like `fork` and `wait`
-- Linux option, for Linux-specific system calls like `epoll_create` and `statx`. Note that this option requires you to provide Linux kernel headers.
-- glibc option, for glibc-specific extensions like `backtrace` and `getopt_long`. Make sure your gcc port has `gnu-user.h` in its `tm_file` if you enable this option.
-- BSD option, for BSD-specific extensions like `openpty` and `getloadavg`
+| Option           | Description                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `linux`          | For source compatiblity with Linux programs. Note that this option requires you to provide Linux kernel headers.                                       |
+| `linux-epoll`    | For `epoll_*` functions. Included in `linux`, but can be compiled standalone.                                                                          |
+| `linux-timerfd`  | For `timerfd_*` functions. Included in `linux`, but can be compiled standalone.                                                                        |
+| `linux-signalfd` | For `signalfd_*` functions. Included in `linux`, but can be compiled standalone.                                                                       |
+| `linux-eventfd`  | For `eventfd_*` functions. Included in `linux`, but can be compiled standalone.                                                                        |
+| `linux-reboot`   | For `reboot*` functions. Included in `linux`, but can be compiled standalone.                                                                          |
+| `glibc`          | For glibc-specific extensions like `backtrace` and `getopt_long`. Make sure your gcc port has `gnu-user.h` in its `tm_file` if you enable this option. |
+| `bsd`            | for BSD-specific extensions like `openpty` and `getloadavg`                                                                                            |
+
 
 ## Enabling more mlibc features
 

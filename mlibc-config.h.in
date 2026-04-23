@@ -96,9 +96,15 @@
 #endif
 
 #mesondefine __MLIBC_BSD_OPTION
+#mesondefine __MLIBC_LINUX_EPOLL_OPTION
+#mesondefine __MLIBC_LINUX_TIMERFD_OPTION
+#mesondefine __MLIBC_LINUX_SIGNALFD_OPTION
+#mesondefine __MLIBC_LINUX_EVENTFD_OPTION
+#mesondefine __MLIBC_LINUX_REBOOT_OPTION
 #mesondefine __MLIBC_POSIX_OPTION
 #mesondefine __MLIBC_LINUX_OPTION
 #mesondefine __MLIBC_GLIBC_OPTION
+#mesondefine __MLIBC_LINUX_WRAPPERS_OPTION
 #mesondefine __MLIBC_SYSDEP_HAS_BITS_SYSCALL_H
 
 #endif /* _MLIBC_CONFIG_H */

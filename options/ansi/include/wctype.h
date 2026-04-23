@@ -6,6 +6,8 @@
 #include <bits/wctype_t.h>
 #include <bits/wctrans_t.h>
 
+#define WEOF ((wint_t)0xffffffffU)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -10,8 +10,8 @@
 #include <bits/ensure.h>
 #include <frg/allocation.hpp>
 #include <mlibc-config.h>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
-#include <mlibc/posix-sysdeps.hpp>
 #include <mlibc/debug.hpp>
 
 // Code taken from musl
@@ -20,13 +20,15 @@ int alphasort(const struct dirent **a, const struct dirent **b) {
 }
 
 int closedir(DIR *dir) {
-	// TODO: Deallocate the dir structure.
 	close(dir->__handle);
+	frg::destruct<__mlibc_dir_struct>(getAllocator(), dir);
 	return 0;
 }
+
 int dirfd(DIR *dir) {
 	return dir->__handle;
 }
+
 DIR *fdopendir(int fd) {
 	struct stat st;
 
@@ -46,19 +48,20 @@ DIR *fdopendir(int fd) {
 	__ensure(dir);
 	dir->__ent_next = 0;
 	dir->__ent_limit = 0;
+	dir->__seek_offset = 0;
 	int flags = fcntl(fd, F_GETFD);
 	fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
 	dir->__handle = fd;
 	return dir;
 }
+
 DIR *opendir(const char *path) {
 	auto dir = frg::construct<__mlibc_dir_struct>(getAllocator());
 	__ensure(dir);
 	dir->__ent_next = 0;
 	dir->__ent_limit = 0;
 
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_open_dir, nullptr);
-	if(int e = mlibc::sys_open_dir(path, &dir->__handle); e) {
+	if(int e = mlibc::sysdep_or_enosys<OpenDir>(path, &dir->__handle); e) {
 		errno = e;
 		frg::destruct(getAllocator(), dir);
 		return nullptr;
@@ -70,8 +73,7 @@ DIR *opendir(const char *path) {
 struct dirent *readdir(DIR *dir) {
 	__ensure(dir->__ent_next <= dir->__ent_limit);
 	if(dir->__ent_next == dir->__ent_limit) {
-		MLIBC_CHECK_OR_ENOSYS(mlibc::sys_read_entries, nullptr);
-		if(int e = mlibc::sys_read_entries(dir->__handle, dir->__ent_buffer, 2048, &dir->__ent_limit); e)
+		if(int e = mlibc::sysdep_or_enosys<ReadEntries>(dir->__handle, dir->__ent_buffer, 2048, &dir->__ent_limit); e)
 			__ensure(!"mlibc::sys_read_entries() failed");
 		dir->__ent_next = 0;
 		if(!dir->__ent_limit)
@@ -79,10 +81,25 @@ struct dirent *readdir(DIR *dir) {
 	}
 
 	auto entp = reinterpret_cast<struct dirent *>(dir->__ent_buffer + dir->__ent_next);
+	dir->__seek_offset = entp->d_off;
 	// We only copy as many bytes as we need to avoid buffer-overflows.
 	memcpy(&dir->__current, entp, offsetof(struct dirent, d_name) + strlen(entp->d_name) + 1);
 	dir->__ent_next += entp->d_reclen;
 	return &dir->__current;
+}
+
+ssize_t posix_getdents(int fildes, void *buf, size_t nbyte, int flags) {
+	if (flags) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	size_t bytes_read = 0;
+	if(int e = mlibc::sysdep_or_enosys<ReadEntries>(fildes, buf, nbyte, &bytes_read); e) {
+		errno = e;
+		return -1;
+	}
+	return bytes_read;
 }
 
 #if __MLIBC_LINUX_OPTION
@@ -90,14 +107,14 @@ struct dirent *readdir(DIR *dir) {
 #endif /* !__MLIBC_LINUX_OPTION */
 
 int readdir_r(DIR *dir, struct dirent *entry, struct dirent **result) {
-	if(!mlibc::sys_read_entries) {
+	if constexpr (!mlibc::IsImplemented<ReadEntries>) {
 		MLIBC_MISSING_SYSDEP();
 		return ENOSYS;
 	}
 
 	__ensure(dir->__ent_next <= dir->__ent_limit);
 	if(dir->__ent_next == dir->__ent_limit) {
-		if(int e = mlibc::sys_read_entries(dir->__handle, dir->__ent_buffer, 2048, &dir->__ent_limit); e)
+		if(int e = mlibc::sysdep_or_panic<ReadEntries>(dir->__handle, dir->__ent_buffer, 2048, &dir->__ent_limit); e)
 			__ensure(!"mlibc::sys_read_entries() failed");
 		dir->__ent_next = 0;
 		if(!dir->__ent_limit) {
@@ -107,6 +124,7 @@ int readdir_r(DIR *dir, struct dirent *entry, struct dirent **result) {
 	}
 
 	auto entp = reinterpret_cast<struct dirent *>(dir->__ent_buffer + dir->__ent_next);
+	dir->__seek_offset = entp->d_off;
 	// We only copy as many bytes as we need to avoid buffer-overflows.
 	memcpy(entry, entp, offsetof(struct dirent, d_name) + strlen(entp->d_name) + 1);
 	dir->__ent_next += entp->d_reclen;
@@ -115,8 +133,9 @@ int readdir_r(DIR *dir, struct dirent *entry, struct dirent **result) {
 }
 
 void rewinddir(DIR *dir) {
-	lseek(dir->__handle, 0, SEEK_SET);
+	dir->__seek_offset = lseek(dir->__handle, 0, SEEK_SET);
 	dir->__ent_next = 0;
+	dir->__ent_limit = 0;
 }
 
 int scandir(const char *path, struct dirent ***res, int (*select)(const struct dirent *),
@@ -174,19 +193,31 @@ int scandir(const char *path, struct dirent ***res, int (*select)(const struct d
 	*res = array;
 	return count;
 }
-void seekdir(DIR *, long) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+
+#if __MLIBC_LINUX_OPTION
+[[gnu::alias("scandir")]] int scandir64(const char *path, struct dirent64 ***res, int (*select)(const struct dirent64 *),
+		int (*compare)(const struct dirent64 **, const struct dirent64 **));
+[[gnu::alias("versionsort")]] int versionsort64(const struct dirent64 **__a, const struct dirent64 **__b);
+#endif /* !__MLIBC_LINUX_OPTION */
+
+void seekdir(DIR *d, long off) {
+	d->__seek_offset = lseek(d->__handle, off, SEEK_SET);
+	d->__ent_next = 0;
+	d->__ent_limit = 0;
 }
-long telldir(DIR *) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+
+long telldir(DIR *d) {
+	return d->__seek_offset;
 }
 
 #if __MLIBC_GLIBC_OPTION
 
 int versionsort(const struct dirent **a, const struct dirent **b) {
 	return strverscmp((*a)->d_name, (*b)->d_name);
+}
+
+ssize_t getdents64(int fd, void *dirp, size_t count) {
+	return posix_getdents(fd, dirp, count, 0);
 }
 
 #endif // __MLIBC_GLIBC_OPTION

@@ -1,3 +1,4 @@
+#include <locale.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,7 +29,7 @@ struct format_test_cases {
 	{"%u", "0420", 420, T_UINT, 1},
 	{"%o", "0420", 0420, T_UINT, 1},
 	{"%x", "0xCB7", 0xCB7, T_UINT, 1},
-#ifndef USE_HOST_LIBC
+#if !defined(USE_HOST_LIBC) && !defined(USE_CROSS_LIBC)
 	{"%b", "0b1011", 0b1011, T_UINT, 1},
 	{"%b", "0B1011", 0b1011, T_UINT, 1},
 #endif
@@ -77,6 +78,9 @@ static void test_matrix() {
 }
 
 int main() {
+	const char *ret = setlocale(LC_ALL, "C");
+	assert(ret && *ret);
+
 	{
 		int x = 0;
 		char buf[] = "12345";
@@ -186,8 +190,8 @@ int main() {
 	assert(sscanf("ab", "abcd") == EOF);
 	assert(sscanf("abab", "abcd") == 0);
 
-	char char_value[8];
-	wchar_t wchar_value[8];
+	char char_value[16];
+	wchar_t wchar_value[16];
 
 	assert(sscanf("a", "%c", char_value) == 1);
 	assert(char_value[0] == 'a');
@@ -513,6 +517,7 @@ int main() {
 	assert(sscanf("0xabcdef12", "%p", &ptr) == 1);
 	assert(ptr == (void*)0xabcdef12);
 #endif
+	assert(sscanf("0x123", "%*p") == 0);
 
 	assert(sscanf("a", "%*c") == 0);
 	char_value[2] = 'q';
@@ -531,6 +536,40 @@ int main() {
 
 	assert(sscanf("zz-zxx-mmm", "%7[zx-]", char_value) == 1);
 	assert(strcmp(char_value, "zz-zxx-") == 0);
+
+	if (!setlocale(LC_ALL, "de_DE.utf8")) {
+		puts("setlocale(de_DE.utf8) failed!");
+		exit(1);
+	}
+
+	assert(sscanf("12,34", "%d", &int_value) == 1);
+	assert(int_value == 12);
+	assert(sscanf("12,34", "%f", &float_value) == 1);
+	// assert(float_value >= 12.34 - 0.01 && float_value <= 12.34 + 0.01);
+
+	assert(sscanf("αβγδ123", "%[α-ω]", char_value) == 1);
+	fprintf(stderr, "'%s'\n", char_value);
+	assert(!strcmp("αβγδ", char_value));
+
+	assert(sscanf("αβγδ123", "%l[α-ω]", wchar_value) == 1);
+	assert(!wcscmp(L"αβγδ", wchar_value));
+
+	// implementation-defined behavior, and glibc returns zero
+#if !defined(USE_HOST_LIBC) && !defined(USE_CROSS_LIBC)
+	assert(sscanf("αβγδ123", "%l[^δ-ω]", wchar_value) == 1);
+	assert(!wcscmp(L"αβγ", wchar_value));
+#endif
+
+	assert(sscanf("α-β-γ-δ-123", "%l[α-ω-]", wchar_value) == 1);
+	assert(!wcscmp(L"α-β-γ-δ-", wchar_value));
+
+	// implementation-defined behavior, and glibc returns zero
+#if !defined(USE_HOST_LIBC) && !defined(USE_CROSS_LIBC)
+	assert(sscanf("α-β-γ-δ-123", "%l[^δ-ω-]", wchar_value) == 1);
+	assert(!wcscmp(L"α", wchar_value));
+#endif
+
+	assert(sscanf("123", "%l[a-z]", wchar_value) == 0);
 
 	return 0;
 }

@@ -28,7 +28,7 @@ extern thread_local TrackerPage *__mlibc_clk_tracker_page;
 
 namespace mlibc {
 
-int sys_clock_get(int clock, time_t *secs, long *nanos) {
+int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
 	// This implementation is inherently signal-safe.
 	if (clock == CLOCK_MONOTONIC || clock == CLOCK_MONOTONIC_RAW
 	    || clock == CLOCK_MONOTONIC_COARSE) {
@@ -79,15 +79,14 @@ int sys_clock_get(int clock, time_t *secs, long *nanos) {
 	return 0;
 }
 
-int sys_clock_getres(int clock, time_t *secs, long *nanos) {
+int Sysdeps<ClockGetres>::operator()(int clock, time_t *secs, long *nanos) {
 	(void)clock;
-	(void)secs;
-	(void)nanos;
-	mlibc::infoLogger() << "mlibc: clock_getres is a stub" << frg::endlog;
+	*secs = 0;
+	*nanos = 1;
 	return 0;
 }
 
-int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
 	SignalGuard sguard;
 
 	if (which != ITIMER_REAL) {
@@ -96,7 +95,7 @@ int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval
 		return EINVAL;
 	}
 
-	managarm::posix::SetIntervalTimerRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::SetIntervalTimerRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_which(which);
 	req.set_value_sec(new_value->it_value.tv_sec);
 	req.set_value_usec(new_value->it_value.tv_usec);
@@ -113,7 +112,7 @@ int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::SetIntervalTimerResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::SetIntervalTimerResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 	__ensure(resp.error() == managarm::posix::Errors::SUCCESS);
 
@@ -169,7 +168,7 @@ void *timer_setup(void *arg) {
 
 	while (true) {
 		pthread_testcancel();
-		while (sys_sigtimedwait(&set, &si, nullptr, &signo))
+		while (sysdep<Sigtimedwait>(&set, &si, nullptr, &signo))
 			;
 		pthread_testcancel();
 		if (si.si_code == SI_TIMER && signo == SIGTIMER)
@@ -181,25 +180,25 @@ void *timer_setup(void *arg) {
 
 } // namespace
 
-int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__restrict res) {
+int Sysdeps<TimerCreate>::operator()(clockid_t clk, struct sigevent *__restrict evp, timer_t *__restrict res) {
 	SignalGuard sguard;
 
 	if (!res)
 		return EINVAL;
 
-	managarm::posix::TimerCreateRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::TimerCreateRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_clockid(clk);
 
 	// TODO: pass sigev_value
 	if (!evp) {
 		req.set_sigev_signo(SIGALRM);
-		req.set_sigev_tid(sys_gettid());
+		req.set_sigev_tid(sysdep<GetTid>());
 	} else if (evp->sigev_notify == SIGEV_NONE) {
 		req.set_sigev_signo(0);
 		req.set_sigev_tid(0);
 	} else if (evp->sigev_notify == SIGEV_SIGNAL) {
 		req.set_sigev_signo(evp->sigev_signo);
-		req.set_sigev_tid(sys_gettid());
+		req.set_sigev_tid(sysdep<GetTid>());
 	} else if (evp->sigev_notify == SIGEV_THREAD_ID) {
 		req.set_sigev_signo(evp->sigev_signo);
 		req.set_sigev_tid(evp->sigev_notify_thread_id);
@@ -208,7 +207,7 @@ int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__
 			struct sigaction sa{};
 			sa.sa_flags = SA_SIGINFO | SA_RESTART;
 			sa.sa_sigaction = timer_handle;
-			sys_sigaction(SIGTIMER, &sa, nullptr);
+			sysdep<Sigaction>(SIGTIMER, &sa, nullptr);
 			timerThreadInit = true;
 		}
 
@@ -235,24 +234,27 @@ int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__
 		};
 		// but also mask SIGTIMER
 		sigaddset(&mask, SIGTIMER);
-		HelWord original_set;
+		HelWord err, original_set;
 		uint64_t unused;
 
-		HEL_CHECK(helSyscall2_2(
+		HEL_CHECK(helSyscall2_3(
 		    kHelObserveSuperCall + posix::superSigMask,
 		    SIG_BLOCK,
 		    *reinterpret_cast<const HelWord *>(&mask),
+		    &err,
 		    &original_set,
 		    &unused
 		));
+		__ensure(err == 0);
 
 		pthread_t pthread;
 		ret = pthread_create(&pthread, &attr, timer_setup, &context);
 
 		// restore previous signal mask
-		HEL_CHECK(helSyscall2_2(
-		    kHelObserveSuperCall + posix::superSigMask, SIG_SETMASK, original_set, &unused, &unused
+		HEL_CHECK(helSyscall2_3(
+		    kHelObserveSuperCall + posix::superSigMask, SIG_SETMASK, original_set, &err, &unused, &unused
 		));
+		__ensure(err == 0);
 
 		if (ret)
 			return ret;
@@ -272,7 +274,7 @@ int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__
 		HEL_CHECK(send_req.error());
 		HEL_CHECK(recv_resp.error());
 
-		managarm::posix::TimerCreateResponse<MemoryAllocator> resp(getSysdepsAllocator());
+		managarm::posix::TimerCreateResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 		resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 		if (resp.error() != managarm::posix::Errors::SUCCESS) {
 			pthread_cancel(pthread);
@@ -306,7 +308,7 @@ int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::TimerCreateResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::TimerCreateResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 	if (resp.error() != managarm::posix::Errors::SUCCESS)
 		return resp.error() | toErrno;
@@ -317,13 +319,12 @@ int sys_timer_create(clockid_t clk, struct sigevent *__restrict evp, timer_t *__
 	return 0;
 }
 
-int sys_timer_settime(
-    timer_t t, int flags, const struct itimerspec *__restrict val, struct itimerspec *__restrict old
+int Sysdeps<TimerSettime>::operator()(    timer_t t, int flags, const struct itimerspec *__restrict val, struct itimerspec *__restrict old
 ) {
 	SignalGuard sguard;
 
 	auto timerHandle = reinterpret_cast<TimerHandle *>(t);
-	managarm::posix::TimerSetRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::TimerSetRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_timer(timerHandle->id);
 	req.set_flags(flags);
 	req.set_value_sec(val->it_value.tv_sec);
@@ -341,7 +342,7 @@ int sys_timer_settime(
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::TimerSetResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::TimerSetResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 	if (resp.error() != managarm::posix::Errors::SUCCESS)
 		return resp.error() | toErrno;
@@ -356,11 +357,11 @@ int sys_timer_settime(
 	return 0;
 }
 
-int sys_timer_gettime(timer_t t, struct itimerspec *val) {
+int Sysdeps<TimerGettime>::operator()(timer_t t, struct itimerspec *val) {
 	SignalGuard sguard;
 
 	auto timerHandle = reinterpret_cast<TimerHandle *>(t);
-	managarm::posix::TimerGetRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::TimerGetRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_timer((timerHandle->id));
 
 	auto [offer, send_req, recv_resp] = exchangeMsgsSync(
@@ -373,7 +374,7 @@ int sys_timer_gettime(timer_t t, struct itimerspec *val) {
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::TimerGetResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::TimerGetResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 	if (resp.error() != managarm::posix::Errors::SUCCESS)
 		return resp.error() | toErrno;
@@ -388,7 +389,7 @@ int sys_timer_gettime(timer_t t, struct itimerspec *val) {
 	return 0;
 }
 
-int sys_timer_delete(timer_t t) {
+int Sysdeps<TimerDelete>::operator()(timer_t t) {
 	SignalGuard sguard;
 
 	auto timerHandle = reinterpret_cast<TimerHandle *>(t);
@@ -398,7 +399,7 @@ int sys_timer_delete(timer_t t) {
 		pthread_kill(timerHandle->thread, SIGTIMER);
 	}
 
-	managarm::posix::TimerDeleteRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::TimerDeleteRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_timer(timerHandle->id);
 	auto [offer, send_req, recv_resp] = exchangeMsgsSync(
 	    getPosixLane(),
@@ -410,7 +411,7 @@ int sys_timer_delete(timer_t t) {
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::TimerDeleteResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::TimerDeleteResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 	return resp.error() | toErrno;
 }

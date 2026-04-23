@@ -5,12 +5,92 @@ sysdep_supported_options = {
 	'bsd': true,
 }
 
+if not no_headers
+	install_headers(
+		'include/abi-bits/access.h',
+		'include/abi-bits/auxv.h',
+		'include/abi-bits/seek-whence.h',
+		'include/abi-bits/vm-flags.h',
+		'include/abi-bits/errno.h',
+		'include/abi-bits/fcntl.h',
+		'include/abi-bits/in.h',
+		'include/abi-bits/stat.h',
+		'include/abi-bits/statx.h',
+		'include/abi-bits/signal.h',
+		'include/abi-bits/reboot.h',
+		'include/abi-bits/resource.h',
+		'include/abi-bits/socket.h',
+		'include/abi-bits/termios.h',
+		'include/abi-bits/time.h',
+		'include/abi-bits/blkcnt_t.h',
+		'include/abi-bits/blksize_t.h',
+		'include/abi-bits/dev_t.h',
+		'include/abi-bits/gid_t.h',
+		'include/abi-bits/ino_t.h',
+		'include/abi-bits/mode_t.h',
+		'include/abi-bits/nlink_t.h',
+		'include/abi-bits/pid_t.h',
+		'include/abi-bits/uid_t.h',
+		'include/abi-bits/wait.h',
+		'include/abi-bits/limits.h',
+		'include/abi-bits/utsname.h',
+		'include/abi-bits/ptrace.h',
+		'include/abi-bits/poll.h',
+		'include/abi-bits/epoll.h',
+		'include/abi-bits/packet.h',
+		'include/abi-bits/inotify.h',
+		'include/abi-bits/clockid_t.h',
+		'include/abi-bits/ipc.h',
+		'include/abi-bits/shm.h',
+		'include/abi-bits/mqueue.h',
+		'include/abi-bits/suseconds_t.h',
+		'include/abi-bits/fsfilcnt_t.h',
+		'include/abi-bits/fsblkcnt_t.h',
+		'include/abi-bits/socklen_t.h',
+		'include/abi-bits/statfs.h',
+		'include/abi-bits/statvfs.h',
+		'include/abi-bits/ioctls.h',
+		'include/abi-bits/xattr.h',
+		'include/abi-bits/msg.h',
+		'include/abi-bits/vt.h',
+		'include/abi-bits/random.h',
+		'include/abi-bits/rlim_t.h',
+		'include/abi-bits/sigval.h',
+		'include/abi-bits/sigevent.h',
+		'include/abi-bits/utmpx.h',
+		'include/abi-bits/utmp-defines.h',
+		'include/abi-bits/fd_set.h',
+		'include/abi-bits/sem.h',
+		'include/abi-bits/route.h',
+		'include/abi-bits/sa_family_t.h',
+		'include/abi-bits/sockaddr_storage.h',
+		'include/abi-bits/sig-limits.h',
+		'include/abi-bits/sigset_t.h',
+		subdir: 'abi-bits',
+		follow_symlinks: true
+	)
+
+	if host_machine.cpu_family() == 'riscv64'
+		install_headers(
+			'include/abi-bits/riscv-hwprobe.h',
+			subdir: 'abi-bits',
+			follow_symlinks: true
+		)
+	endif
+endif
+
+if headers_only
+	subdir_done()
+endif
+
+mlibc_c_args += c_compiler.get_supported_arguments(['-Wthread-safety'])
+
 managarm = subproject('managarm', default_options: [ 'provide_deps=true' ])
 hel_dep = managarm.get_variable('hel_dep')
 proto_posix_dep = managarm.get_variable('posix_extra_dep')
 
 bragi = find_program('bragi')
-bragi_dep = subproject('bragi', default_options: ['install_headers=false']).get_variable('bragi_dep')
+bragi_dep = dependency('bragi', method: 'pkg-config')
 
 libdrm_dep = subproject('libdrm-headers').get_variable('libdrm_dep')
 
@@ -83,98 +163,24 @@ else
 	error('Unknown architecture')
 endif
 
-if not no_headers
-	install_headers(
-		'include/abi-bits/access.h',
-		'include/abi-bits/auxv.h',
-		'include/abi-bits/seek-whence.h',
-		'include/abi-bits/vm-flags.h',
-		'include/abi-bits/errno.h',
-		'include/abi-bits/fcntl.h',
-		'include/abi-bits/in.h',
-		'include/abi-bits/stat.h',
-		'include/abi-bits/statx.h',
-		'include/abi-bits/signal.h',
-		'include/abi-bits/reboot.h',
-		'include/abi-bits/resource.h',
-		'include/abi-bits/socket.h',
-		'include/abi-bits/termios.h',
-		'include/abi-bits/time.h',
-		'include/abi-bits/blkcnt_t.h',
-		'include/abi-bits/blksize_t.h',
-		'include/abi-bits/dev_t.h',
-		'include/abi-bits/gid_t.h',
-		'include/abi-bits/ino_t.h',
-		'include/abi-bits/mode_t.h',
-		'include/abi-bits/nlink_t.h',
-		'include/abi-bits/pid_t.h',
-		'include/abi-bits/uid_t.h',
-		'include/abi-bits/wait.h',
-		'include/abi-bits/limits.h',
-		'include/abi-bits/utsname.h',
-		'include/abi-bits/ptrace.h',
-		'include/abi-bits/poll.h',
-		'include/abi-bits/epoll.h',
-		'include/abi-bits/packet.h',
-		'include/abi-bits/inotify.h',
-		'include/abi-bits/clockid_t.h',
-		'include/abi-bits/ipc.h',
-		'include/abi-bits/shm.h',
-		'include/abi-bits/mqueue.h',
-		'include/abi-bits/suseconds_t.h',
-		'include/abi-bits/fsfilcnt_t.h',
-		'include/abi-bits/fsblkcnt_t.h',
-		'include/abi-bits/socklen_t.h',
-		'include/abi-bits/statfs.h',
-		'include/abi-bits/statvfs.h',
-		'include/abi-bits/ioctls.h',
-		'include/abi-bits/xattr.h',
-		'include/abi-bits/msg.h',
-		'include/abi-bits/vt.h',
-		'include/abi-bits/random.h',
-		'include/abi-bits/rlim_t.h',
-		'include/abi-bits/sigval.h',
-		'include/abi-bits/sigevent.h',
-		'include/abi-bits/utmpx.h',
-		'include/abi-bits/utmp-defines.h',
-		'include/abi-bits/fd_set.h',
-		'include/abi-bits/sem.h',
-		'include/abi-bits/route.h',
-		subdir: 'abi-bits',
-		follow_symlinks: true
+crtstuff = ['crt0']
+if host_machine.cpu_family() in ['x86_64', 'aarch64', 'riscv64']
+	crtstuff += [
+		'Scrt1',
+		'crti',
+		'crtn'
+	]
+endif
+foreach crtthing : crtstuff
+	crtf = crtthing + '.S'
+	crt_src = files(host_machine.cpu_family() / 'crt-src' / crtf)
+	crt = custom_target(
+		crtthing,
+		build_by_default: true,
+		command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
+		input: crt_src,
+		output: crtthing + '.o',
+		install: true,
+		install_dir: get_option('libdir')
 	)
-
-	if host_machine.cpu_family() == 'riscv64'
-		install_headers(
-			'include/abi-bits/riscv-hwprobe.h',
-			subdir: 'abi-bits',
-			follow_symlinks: true
-		)
-	endif
-endif
-
-if not headers_only
-	crtstuff = ['crt0']
-	if host_machine.cpu_family() in ['x86_64', 'aarch64', 'riscv64']
-		crtstuff += [
-			'Scrt1',
-			'crti',
-			'crtn'
-		]
-	endif
-	foreach crtthing : crtstuff
-		crtf = crtthing + '.S'
-		crt_src = files(host_machine.cpu_family() / 'crt-src' / crtf)
-		crt = custom_target(
-			crtthing,
-			build_by_default: true,
-			command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
-			input: crt_src,
-			output: crtthing + '.o',
-			install: true,
-			install_dir: get_option('libdir')
-		)
-	endforeach
-
-endif
-
+endforeach

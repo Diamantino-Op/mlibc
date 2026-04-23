@@ -2,9 +2,10 @@
 #define _ABIBITS_IN_H
 
 #include <mlibc-config.h>
+#include <abi-bits/sa_family_t.h>
+#include <abi-bits/sockaddr_storage.h>
 #include <bits/posix/in_addr_t.h>
 #include <bits/posix/in_port_t.h>
-#include <abi-bits/socket.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -22,7 +23,7 @@ struct sockaddr_in {
 	uint8_t sin_zero[8];
 };
 
-#if !__MLIBC_LINUX_OPTION || (!defined(_UAPI_LINUX_IN6_H) && !defined(_UAPI_IPV6_H))
+#if !__UAPI_DEF_IN6_ADDR
 struct in6_addr {
 	union {
 		uint8_t __s6_addr[16];
@@ -33,7 +34,9 @@ struct in6_addr {
 #define s6_addr __in6_union.__s6_addr
 #define s6_addr16 __in6_union.__s6_addr16
 #define s6_addr32 __in6_union.__s6_addr32
+#endif /* !__UAPI_DEF_IN6_ADDR */
 
+#if !__UAPI_DEF_SOCKADDR_IN6
 struct sockaddr_in6 {
 	sa_family_t     sin6_family;
 	in_port_t       sin6_port;
@@ -41,20 +44,25 @@ struct sockaddr_in6 {
 	struct in6_addr sin6_addr;
 	uint32_t        sin6_scope_id;
 };
+#endif /* !__UAPI_DEF_SOCKADDR_IN6 */
 
+#if !__UAPI_DEF_IPV6_MREQ
 struct ipv6_mreq {
 	struct in6_addr ipv6mr_multiaddr;
 	unsigned        ipv6mr_interface;
 };
+#endif /* !__UAPI_DEF_IPV6_MREQ */
 
+#if !__UAPI_DEF_IN6_PKTINFO
+#if defined(_GNU_SOURCE)
 struct in6_pktinfo {
 	struct in6_addr ipi6_addr;
 	uint32_t ipi6_ifindex;
 };
-#endif /* !__MLIBC_LINUX_OPTION || (!defined(_UAPI_LINUX_IN6_H) && !defined(_UAPI_IPV6_H)) */
+#endif /* defined(_GNU_SOURCE) */
+#endif /* !__UAPI_DEF_IN6_PKTINFO */
 
-#define MCAST_INCLUDE 1
-
+#if defined(_DEFAULT_SOURCE)
 struct ip_mreq {
 	struct in_addr imr_multiaddr;
 	struct in_addr imr_interface;
@@ -88,6 +96,8 @@ struct group_source_req {
 	struct sockaddr_storage gsr_group;
 	struct sockaddr_storage gsr_source;
 };
+
+#endif /* defined(_DEFAULT_SOURCE) */
 
 #ifdef __cplusplus
 }
@@ -167,9 +177,13 @@ struct group_source_req {
 #define IP_BLOCK_SOURCE 38
 #define IP_ADD_SOURCE_MEMBERSHIP 39
 #define IP_DROP_SOURCE_MEMBERSHIP 40
+
+#if defined(_DEFAULT_SOURCE)
 #define IP_UNICAST_IF 50
+#endif /* defined(_DEFAULT_SOURCE) */
 
 #define IPV6_2292PKTOPTIONS 6
+#define IPV6_CHECKSUM 7
 #define IPV6_2292HOPLIMIT 8
 #define IPV6_UNICAST_HOPS 16
 #define IPV6_MULTICAST_IF 17
@@ -206,11 +220,13 @@ struct group_source_req {
 #define IP_PMTUDISC_INTERFACE 4
 #define IP_PMTUDISC_OMIT 5
 
+#if defined(_DEFAULT_SOURCE)
 #define MCAST_JOIN_GROUP 42
 #define MCAST_BLOCK_SOURCE 43
 #define MCAST_UNBLOCK_SOURCE 44
 #define MCAST_JOIN_SOURCE_GROUP 46
 #define MCAST_LEAVE_SOURCE_GROUP 47
+#endif /* defined(_DEFAULT_SOURCE) */
 
 #if __MLIBC_LINUX_OPTION
 
@@ -222,7 +238,7 @@ struct group_source_req {
 #define __UAPI_DEF_SOCKADDR_IN 0
 
 #define __UAPI_DEF_IN6_ADDR 0
-#define __UAPI_DEF_IN6_ADDR_ALT 1
+#define __UAPI_DEF_IN6_ADDR_ALT 0
 #define __UAPI_DEF_IN6_PKTINFO 0
 #define __UAPI_DEF_IP6_MTUINFO 0
 #define __UAPI_DEF_IPPROTO_V6 0

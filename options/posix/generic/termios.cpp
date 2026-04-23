@@ -6,7 +6,7 @@
 #include <termios.h>
 
 #include <bits/ensure.h>
-#include <mlibc/posix-sysdeps.hpp>
+#include <mlibc/all-sysdeps.hpp>
 
 speed_t cfgetispeed(const struct termios *tios) {
 	return tios->c_cflag & CBAUD;
@@ -43,8 +43,7 @@ void cfmakeraw(struct termios *t) {
 }
 
 int tcdrain(int fd) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_tcdrain, -1);
-	if(int e = mlibc::sys_tcdrain(fd); e) {
+	if(int e = mlibc::sysdep_or_enosys<Tcdrain>(fd); e) {
 		errno = e;
 		return -1;
 	}
@@ -52,8 +51,7 @@ int tcdrain(int fd) {
 }
 
 int tcflow(int fd, int action) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_tcflow, -1);
-	if(int e = mlibc::sys_tcflow(fd, action); e) {
+	if(int e = mlibc::sysdep_or_enosys<Tcflow>(fd, action); e) {
 		errno = e;
 		return -1;
 	}
@@ -61,8 +59,7 @@ int tcflow(int fd, int action) {
 }
 
 int tcflush(int fd, int queue_selector) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_tcflush, -1);
-	if(int e = mlibc::sys_tcflush(fd, queue_selector); e) {
+	if(int e = mlibc::sysdep_or_enosys<Tcflush>(fd, queue_selector); e) {
 		errno = e;
 		return -1;
 	}
@@ -70,8 +67,7 @@ int tcflush(int fd, int queue_selector) {
 }
 
 int tcgetattr(int fd, struct termios *attr) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_tcgetattr, -1);
-	if(int e = mlibc::sys_tcgetattr(fd, attr); e) {
+	if(int e = mlibc::sysdep_or_enosys<Tcgetattr>(fd, attr); e) {
 		errno = e;
 		return -1;
 	}
@@ -80,22 +76,39 @@ int tcgetattr(int fd, struct termios *attr) {
 
 pid_t tcgetsid(int fd) {
 	int sid, scratch;
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_ioctl, -1);
-	if(int e = mlibc::sys_ioctl(fd, TIOCGSID, &sid, &scratch); e) {
+	if(int e = mlibc::sysdep_or_enosys<Ioctl>(fd, TIOCGSID, &sid, &scratch); e) {
 		errno = e;
 		return -1;
 	}
 	return sid;
 }
 
-int tcsendbreak(int, int) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+int tcsendbreak(int fd, int dur) {
+	if(int e = mlibc::sysdep_or_enosys<Tcsendbreak>(fd, dur); e) {
+		errno = e;
+		return -1;
+	}
+	return 0;
 }
 
 int tcsetattr(int fd, int opts, const struct termios *attr) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_tcsetattr, -1);
-	if(int e = mlibc::sys_tcsetattr(fd, opts, attr); e) {
+	if(int e = mlibc::sysdep_or_enosys<Tcsetattr>(fd, opts, attr); e) {
+		errno = e;
+		return -1;
+	}
+	return 0;
+}
+
+int tcgetwinsize(int fd, struct winsize *winsz) {
+	if(int e = mlibc::sysdep_or_enosys<Tcgetwinsize>(fd, winsz); e) {
+		errno = e;
+		return -1;
+	}
+	return 0;
+}
+
+int tcsetwinsize(int fd, const struct winsize *winsz) {
+	if(int e = mlibc::sysdep_or_enosys<Tcsetwinsize>(fd, winsz); e) {
 		errno = e;
 		return -1;
 	}

@@ -15,10 +15,12 @@
 #include <abi-bits/fcntl.h>
 #include <frg/allocation.hpp>
 #include <frg/mutex.hpp>
+#include <frg/scope_exit.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/file-io.hpp>
-#include <mlibc/ansi-sysdeps.hpp>
 #include <mlibc/lock.hpp>
+#include <mlibc/exit.hpp>
 
 namespace mlibc {
 
@@ -275,6 +277,10 @@ void abstract_file::purge() {
 	__unget_ptr = __buffer_ptr;
 }
 
+int abstract_file::post_flush() {
+	return 0;
+}
+
 int abstract_file::flush() {
 	if (__dirty_end != __dirty_begin) {
 		if (int e = _write_back(); e)
@@ -284,7 +290,7 @@ int abstract_file::flush() {
 	if (int e = _save_pos(); e)
 		return e;
 	purge();
-	return 0;
+	return post_flush();
 }
 
 int abstract_file::tell(off_t *current_offset) {
@@ -322,6 +328,17 @@ int abstract_file::seek(off_t offset, int whence) {
 	purge();
 
 	return 0;
+}
+
+bool abstract_file::check_orientation(stream_orientation orientation) {
+	if (_orientation == orientation) {
+		return true;
+	} else if (_orientation == stream_orientation::none) {
+		_orientation = orientation;
+		return true;
+	} else {
+		return false;
+	}
 }
 
 int abstract_file::_init_type() {
@@ -392,7 +409,8 @@ int abstract_file::_save_pos() {
 		auto seek_offset = (off_t(__offset) - off_t(__io_offset));
 		if (int e = io_seek(seek_offset, SEEK_CUR, &new_offset); e) {
 			__status_bits |= __MLIBC_ERROR_BIT;
-			mlibc::infoLogger() << "hit io_seek() error " << e << frg::endlog;
+			if(!mlibc::processIsExiting.load(std::memory_order_relaxed))
+				mlibc::infoLogger() << "hit io_seek() error " << e << frg::endlog;
 			return e;
 		}
 		return 0;
@@ -442,20 +460,35 @@ int fd_file::close() {
 	if(__dirty_begin != __dirty_end)
 		mlibc::infoLogger() << "mlibc warning: File is not flushed before closing"
 				<< frg::endlog;
-	if(int e = mlibc::sys_close(_fd); e)
+	if(int e = mlibc::sysdep<Close>(_fd); e)
 		return e;
 	return 0;
 }
 
 int fd_file::reopen(const char *path, const char *mode) {
+	flush();
+
 	int mode_flags = parse_modestring(mode);
+	const char *reopen_path = path;
+
+	if (!path) {
+		char *out = nullptr;
+		if (int e = sysdep_or_enosys<FdToPath>(_fd, &out); e)
+			return e;
+		reopen_path = out;
+	}
+
+	frg::scope_exit freePath([&]() {
+		// free `reopen_path` if it was allocated
+		if (path != reopen_path)
+			getAllocator().free(const_cast<char *>(reopen_path));
+	});
 
 	int fd;
-	if(int e = sys_open(path, mode_flags, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, &fd); e) {
+	if(int e = sysdep<Open>(reopen_path, mode_flags, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, &fd); e) {
 		return e;
 	}
 
-	flush();
 	close();
 	getAllocator().deallocate(__buffer_ptr, __buffer_size + ungetBufferSize);
 
@@ -464,6 +497,8 @@ int fd_file::reopen(const char *path, const char *mode) {
 	__buffer_size = 4096;
 	_reset();
 	_fd = fd;
+	_orientation = stream_orientation::none;
+	_mbstate = {};
 
 	if(mode_flags & O_APPEND) {
 		seek(0, SEEK_END);
@@ -474,7 +509,7 @@ int fd_file::reopen(const char *path, const char *mode) {
 
 int fd_file::determine_type(stream_type *type) {
 	off_t offset;
-	int e = mlibc::sys_seek(_fd, 0, SEEK_CUR, &offset);
+	int e = mlibc::sysdep<Seek>(_fd, 0, SEEK_CUR, &offset);
 	if(!e) {
 		*type = stream_type::file_like;
 		return 0;
@@ -488,7 +523,7 @@ int fd_file::determine_type(stream_type *type) {
 
 int fd_file::determine_bufmode(buffer_mode *mode) {
 	// When isatty() is not implemented, we fall back to the safest default (no buffering).
-	if(!mlibc::sys_isatty) {
+	if constexpr (!mlibc::IsImplemented<Isatty>) {
 		MLIBC_MISSING_SYSDEP();
 		*mode = buffer_mode::no_buffer;
 		return 0;
@@ -498,7 +533,7 @@ int fd_file::determine_bufmode(buffer_mode *mode) {
 		return 0;
 	}
 
-	if(int e = mlibc::sys_isatty(_fd); !e) {
+	if(int e = mlibc::sysdep<Isatty>(_fd); !e) {
 		*mode = buffer_mode::line_buffer;
 		return 0;
 	}else if(e == ENOTTY) {
@@ -513,7 +548,7 @@ int fd_file::determine_bufmode(buffer_mode *mode) {
 
 int fd_file::io_read(char *buffer, size_t max_size, size_t *actual_size) {
 	ssize_t s;
-	if(int e = mlibc::sys_read(_fd, buffer, max_size, &s); e)
+	if(int e = mlibc::sysdep<Read>(_fd, buffer, max_size, &s); e)
 		return e;
 	*actual_size = s;
 	return 0;
@@ -521,14 +556,14 @@ int fd_file::io_read(char *buffer, size_t max_size, size_t *actual_size) {
 
 int fd_file::io_write(const char *buffer, size_t max_size, size_t *actual_size) {
 	ssize_t s;
-	if(int e = mlibc::sys_write(_fd, buffer, max_size, &s); e)
+	if(int e = mlibc::sysdep<Write>(_fd, buffer, max_size, &s); e)
 		return e;
 	*actual_size = s;
 	return 0;
 }
 
 int fd_file::io_seek(off_t offset, int whence, off_t *new_offset) {
-	if(int e = mlibc::sys_seek(_fd, offset, whence, new_offset); e)
+	if(int e = mlibc::sysdep<Seek>(_fd, offset, whence, new_offset); e)
 		return e;
 	return 0;
 }
@@ -596,7 +631,7 @@ namespace {
 		~stdio_guard() {
 			// Only flush the files but do not close them.
 			for(auto it : mlibc::global_file_list()) {
-				if(int e = it->flush(); e)
+				if(int e = it->flush(); e && !mlibc::processIsExiting.load(std::memory_order_relaxed))
 					mlibc::infoLogger() << "mlibc warning: Failed to flush file before exit()"
 							<< frg::endlog;
 			}
@@ -623,7 +658,7 @@ FILE *fopen(const char *path, const char *mode) {
 	int flags = mlibc::fd_file::parse_modestring(mode);
 
 	int fd;
-	if(int e = mlibc::sys_open(path, flags, 0666, &fd); e) {
+	if(int e = mlibc::sysdep<Open>(path, flags, 0666, &fd); e) {
 		errno = e;
 		return nullptr;
 	}
@@ -631,6 +666,10 @@ FILE *fopen(const char *path, const char *mode) {
 	return frg::construct<mlibc::fd_file>(getAllocator(), fd,
 			mlibc::file_dispose_cb<mlibc::fd_file>);
 }
+
+#if __MLIBC_LINUX_OPTION
+[[gnu::alias("fopen")]] FILE *fopen64(const char *path, const char *mode);
+#endif /* !__MLIBC_LINUX_OPTION */
 
 int fclose(FILE *file_base) {
 	auto file = static_cast<mlibc::abstract_file *>(file_base);
@@ -731,6 +770,7 @@ void rewind(FILE *file_base) {
 	file_base->__status_bits &= ~(__MLIBC_EOF_BIT | __MLIBC_ERROR_BIT);
 }
 
+// byte-oriented (POSIX)
 int ungetc(int c, FILE *file_base) {
 	if (c == EOF)
 		return EOF;

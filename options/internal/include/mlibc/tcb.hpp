@@ -4,6 +4,8 @@
 #include <limits.h>
 #include <bits/size_t.h>
 #include <frg/array.hpp>
+#include <frg/list.hpp>
+#include <mlibc/threads.hpp>
 
 #include "elf.hpp"
 
@@ -44,7 +46,7 @@ namespace {
 	constexpr unsigned int tcbCancelingBit = 1 << 3;
 	// Set when the thread is exiting.
 	constexpr unsigned int tcbExitingBit = 1 << 4;
-}
+} // namespace
 
 namespace mlibc {
 	// Returns true when bitmask indicates thread has been asynchronously
@@ -66,7 +68,7 @@ namespace mlibc {
 		return (value & tcbCancelEnableBit);
 	}
 
-	// Returns true when bitmask indicates threas has been cancelled.
+	// Returns true when bitmask indicates thread has been cancelled.
 	static constexpr bool tcb_cancelled(int value) {
 		return (value & (tcbCancelEnableBit | tcbCancelTriggerBit))
 		       == (tcbCancelEnableBit | tcbCancelTriggerBit);
@@ -79,7 +81,7 @@ namespace mlibc {
 	// Otherwise this will be set to true after RTLD has initialized the TCB.
 	extern bool tcb_available_flag;
 #endif
-}
+} // namespace mlibc
 
 enum class TcbThreadReturnValue {
 	Pointer,
@@ -98,10 +100,7 @@ struct Tcb {
 	uintptr_t stackCanary;
 	int cancelBits;
 
-	union {
-		void *voidPtr;
-		int intVal;
-	} returnValue;
+	mlibc::thread_exit_return returnValue;
 	TcbThreadReturnValue returnValueType;
 
 	struct AtforkHandler {
@@ -120,12 +119,19 @@ struct Tcb {
 		void (*func)(void *);
 		void *arg;
 
-		CleanupHandler *next;
-		CleanupHandler *prev;
+		frg::default_list_hook<CleanupHandler> hook_;
 	};
 
-	CleanupHandler *cleanupBegin;
-	CleanupHandler *cleanupEnd;
+	using CleanupHandlerList = frg::intrusive_list<
+		CleanupHandler,
+		frg::locate_member<
+			CleanupHandler,
+			frg::default_list_hook<CleanupHandler>,
+			&CleanupHandler::hook_
+		>
+	>;
+
+	CleanupHandlerList cleanupHandlers;
 	int isJoinable;
 
 	struct LocalKey {
@@ -144,7 +150,7 @@ struct Tcb {
 			returnValue.voidPtr = func(user_arg);
 		} else {
 			auto func = reinterpret_cast<int (*)(void *)>(entry);
-			returnValue.intVal = func(user_arg);
+			returnValue.integer = func(user_arg);
 		}
 	}
 };

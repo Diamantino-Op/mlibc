@@ -1,4 +1,5 @@
 #include <fenv.h>
+#include <locale.h>
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
@@ -13,9 +14,17 @@
 }
 
 int main() {
+	const char *ret = setlocale(LC_ALL, "C");
+	assert(ret && *ret);
+
 	char buf[64] = { 0 };
 	sprintf(buf, "%d", 12);
 	assert(!strcmp(buf, "12"));
+#if __INTPTR_WIDTH__ == 64
+	// regression test for frigg#120
+	sprintf(buf, "%ld", 1UL << 63);
+	assert(!strcmp(buf, "-9223372036854775808"));
+#endif
 
 	sprintf(buf, "%f", 3.14);
 	assert(!strcmp(buf, "3.140000"));
@@ -142,7 +151,6 @@ int main() {
 #pragma GCC diagnostic pop
 
 	// Test '#' flag.
-	// TODO: Test with a, A, e, E, f, F, g, G conversions.
 	sprintf(buf, "%#x", 12);
 	assert(!strcmp(buf, "0xc"));
 	sprintf(buf, "%#X", 12);
@@ -156,6 +164,27 @@ int main() {
 	assert(!strcmp(buf, "0"));
 	sprintf(buf, "%#o", 0);
 	assert(!strcmp(buf, "0"));
+
+	sprintf(buf, "%#.a", -42.0);
+	assert(!strcmp(buf, "-0x1.p+5"));
+	sprintf(buf, "%#.A", -42.0);
+	assert(!strcmp(buf, "-0X1.P+5"));
+	sprintf(buf, "%#.f", 1.0);
+	assert(!strcmp(buf, "1."));
+	sprintf(buf, "%#.F", 1.0);
+	assert(!strcmp(buf, "1."));
+	sprintf(buf, "%#.g", 1.0);
+	assert(!strcmp(buf, "1."));
+	sprintf(buf, "%#.g", 42.0);
+	assert(!strcmp(buf, "4.e+01"));
+	sprintf(buf, "%#.G", 1.0);
+	assert(!strcmp(buf, "1."));
+	sprintf(buf, "%#.G", 42.0);
+	assert(!strcmp(buf, "4.E+01"));
+	sprintf(buf, "%#.0e", -42.0);
+	assert(!strcmp(buf, "-4.e+01"));
+	sprintf(buf, "%#.0E", -42.0);
+	assert(!strcmp(buf, "-4.E+01"));
 
 	// Disable -Wformat here because the compiler might not know about the b specifier.
 #pragma GCC diagnostic push
@@ -401,6 +430,8 @@ int main() {
 	assert(!strcmp(buf, "-nan"));
 	sprintf(buf, "%A", NAN);
 	assert(!strcmp(buf, "NAN"));
+	sprintf(buf, "%.5A", 42.0);
+	assert(!strcmp(buf, "0X1.50000P+5"));
 
 	// Test %a/%A padding
 	test_roundtrip(10.25, "%25a", "%lf", "                0x1.48p+3", 1);
@@ -409,6 +440,23 @@ int main() {
 	test_roundtrip(10.25, "%-25A", "%lf", "0X1.48P+3                ", 1);
 	test_roundtrip(-10.25, "%25a", "%lf", "               -0x1.48p+3", 1);
 	test_roundtrip(-10.25, "%-25a", "%lf", "-0x1.48p+3               ", 1);
+
+	setlocale(LC_ALL, "en_US.utf8");
+
+	sprintf(buf, "%'f", 42.69);
+	assert(!strcmp(buf, "42.690000"));
+
+	sprintf(buf, "%'20f", 1337420.69);
+	assert(!strcmp(buf, "    1,337,420.690000"));
+
+	sprintf(buf, "%'-20f", 1337420.69);
+	assert(!strcmp(buf, "1,337,420.690000    "));
+
+	sprintf(buf, "%'-10g", 1337.69);
+	assert(!strcmp(buf, "1,337.69  "));
+
+	sprintf(buf, "%'10g", 1337.69);
+	assert(!strcmp(buf, "  1,337.69"));
 
 	return 0;
 }

@@ -35,20 +35,7 @@ extern "C" {
 /* [7.27.1] Components of time */
 
 #include <bits/ansi/clock_t.h>
-
-struct tm {
-	int tm_sec;
-	int tm_min;
-	int tm_hour;
-	int tm_mday;
-	int tm_mon;
-	int tm_year;
-	int tm_wday;
-	int tm_yday;
-	int tm_isdst;
-	long int tm_gmtoff;
-	const char *tm_zone;
-};
+#include <bits/ansi/tm.h>
 
 #ifndef __MLIBC_ABI_ONLY
 
@@ -70,7 +57,7 @@ struct tm *localtime(const time_t *__timer);
 size_t strftime(char *__restrict __dest, size_t __max_size,
 		const char *__restrict __format, const struct tm *__restrict __ptr);
 
-#if __MLIBC_POSIX1
+#if defined(_DEFAULT_SOURCE) || __MLIBC_POSIX1
 void tzset(void);
 #endif
 
@@ -102,7 +89,7 @@ extern int daylight;
 extern long timezone;
 #endif
 
-#if __MLIBC_POSIX1
+#if defined(_DEFAULT_SOURCE) || __MLIBC_POSIX1
 extern char *tzname[2];
 #endif
 

@@ -9,6 +9,10 @@ project(
 	meson_version: '>=1.3.0',
 )
 
+if meson.is_subproject()
+	error('mlibc cannot be correctly used as a meson subproject. Instead, bootstrap a compiler, use mlibc headers and mlibc proper to build a correct toolchain.')
+endif
+
 fs = import('fs')
 
 rtld_include_dirs = [
@@ -39,6 +43,14 @@ no_headers = get_option('no_headers')
 library_type = get_option('default_library')
 build_tests = get_option('build_tests')
 build_tests_host_libc = get_option('build_tests_host_libc')
+build_tests_cross_libc = get_option('build_tests_cross_libc')
+cross_libc_ld_prefix = get_option('cross_libc_ld_prefix')
+
+# Disable cross-libc tests if no multilib is given, or build == host
+if cross_libc_ld_prefix == '' or build_machine.cpu_family() == host_machine.cpu_family()
+	build_tests_cross_libc = false
+endif
+
 libgcc_dependency = get_option('libgcc_dependency')
 internal_conf = configuration_data()
 mlibc_conf = configuration_data()
@@ -49,39 +61,29 @@ if not headers_only
 	c_compiler = meson.get_compiler('c')
 	cpp_compiler = meson.get_compiler('cpp')
 
+	if cpp_compiler.get_id() == 'gcc' and not cpp_compiler.version().version_compare('>=13.1.0')
+		error('GCC version 13 or higher is required; found version ' + cpp_compiler.version())
+	endif
+
 	target_triple = run_command(c_compiler.cmd_array(), '-dumpmachine', check: true).stdout()
 	use_freestnd_hdrs = get_option('use_freestnd_hdrs').disable_auto_if(
 			target_triple.to_lower().contains('mlibc'))
 
-	if host_machine.system() != 'horizonos'
-		freestnd_c_hdrs_dep = dependency(
-			'freestnd-c-hdrs-' + host_machine.cpu_family(),
-			required: use_freestnd_hdrs,
-			fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
-		)
-		libc_deps += freestnd_c_hdrs_dep
-		rtld_deps += freestnd_c_hdrs_dep
+	freestnd_c_hdrs_dep = dependency(
+		'freestnd-c-hdrs-' + host_machine.cpu_family(),
+		required: use_freestnd_hdrs,
+		fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
+	)
+	libc_deps += freestnd_c_hdrs_dep
+	rtld_deps += freestnd_c_hdrs_dep
 
-		freestnd_cxx_hdrs_dep = dependency(
-			'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
-			required: use_freestnd_hdrs,
-			fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
-		)
-		libc_deps += freestnd_cxx_hdrs_dep
-		rtld_deps += freestnd_cxx_hdrs_dep
-	else
-		deps_proj = subproject('horizon_deps')
-
-		freestnd_c_hdrs_dep = deps_proj.get_variable('freestnd_c_hdrs_dep')
-
-		libc_deps += freestnd_c_hdrs_dep
-		rtld_deps += freestnd_c_hdrs_dep
-
-		freestnd_cxx_hdrs_dep = deps_proj.get_variable('freestnd_cxx_hdrs_dep')
-
-		libc_deps += freestnd_cxx_hdrs_dep
-		rtld_deps += freestnd_cxx_hdrs_dep
-	endif
+	freestnd_cxx_hdrs_dep = dependency(
+		'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
+		required: use_freestnd_hdrs,
+		fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
+	)
+	libc_deps += freestnd_cxx_hdrs_dep
+	rtld_deps += freestnd_cxx_hdrs_dep
 
 	frigg_dep = dependency(
 		'frigg',
@@ -94,11 +96,18 @@ if not headers_only
 	libc_deps += frigg_dep
 	rtld_deps += frigg_dep
 
-	add_project_arguments('-Wno-unused-function', '-D__MLIBC_BUILDING_MLIBC', language: ['c', 'cpp'])
-	add_project_arguments('-nostdinc', '-fno-builtin', '-ffreestanding', language: ['c', 'cpp'])
+	libsmarter_dep = dependency(
+		'libsmarter',
+		default_options: ['no_install=true'],
+		fallback: ['libsmarter', 'libsmarter_dep'],
+	)
+	libc_deps += libsmarter_dep
+	rtld_deps += libsmarter_dep
+
+	mlibc_c_args = ['-Wno-unused-function', '-D__MLIBC_BUILDING_MLIBC', '-fno-builtin', '-ffreestanding']
+	mlibc_link_args = ['-nostdlib']
 	add_project_arguments('-Werror=misleading-indentation', language: ['c', 'cpp'])
 	add_project_arguments('-fno-rtti', '-fno-exceptions', language: 'cpp')
-	add_project_link_arguments('-nostdlib', language: ['c', 'cpp'])
 
 	if get_option('buildtype').startswith('debug')
 		add_project_arguments('-D__MLIBC_DEBUG', language : ['c', 'cpp'])
@@ -124,15 +133,6 @@ if not headers_only
 
 		if ccdir == ''
 			error('could not find compiler-specific header directory')
-		endif
-
-		if c_compiler.get_id() == 'gcc' and fs.exists(ccdir / 'include-fixed')
-			rtld_include_dirs += include_directories(ccdir / 'include-fixed')
-			libc_include_dirs += include_directories(ccdir / 'include-fixed')
-		endif
-
-		if host_machine.system() == 'horizonos'
-			ccdir = ccdir.replace(meson.global_source_root(), '../../..')
 		endif
 
 		rtld_include_dirs += include_directories(ccdir / 'include')
@@ -248,13 +248,8 @@ if host_machine.system() == 'linux'
 
 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
-	subdir('sysdeps/linux')
-elif host_machine.system() == 'aero'
-	rtld_include_dirs += include_directories('sysdeps/aero/include')
-	libc_include_dirs += include_directories('sysdeps/aero/include')
-	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
-	subdir('sysdeps/aero')
+	subdir('sysdeps/linux')
 elif host_machine.system() == 'managarm'
 	# TODO: Adopt the include_directories() commands from the managarm meson.build.
 	rtld_include_dirs += include_directories('sysdeps/managarm/include')
@@ -274,18 +269,6 @@ elif host_machine.system() == 'keyronex'
 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/keyronex')
-elif host_machine.system() == 'vinix'
-	rtld_include_dirs += include_directories('sysdeps/vinix/include')
-	libc_include_dirs += include_directories('sysdeps/vinix/include')
-	subdir('sysdeps/vinix')
-elif host_machine.system() == 'lemon'
-	rtld_include_dirs += include_directories('sysdeps/lemon/include')
-	libc_include_dirs += include_directories('sysdeps/lemon/include')
-	subdir('sysdeps/lemon')
-elif host_machine.system() == 'dripos'
-	rtld_include_dirs += include_directories('sysdeps/dripos/include')
-	libc_include_dirs += include_directories('sysdeps/dripos/include')
-	subdir('sysdeps/dripos')
 elif host_machine.system() == 'astral'
 	rtld_include_dirs += include_directories('sysdeps/astral/include')
 	libc_include_dirs += include_directories('sysdeps/astral/include')
@@ -293,15 +276,23 @@ elif host_machine.system() == 'astral'
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	subdir('sysdeps/astral')
-elif host_machine.system() == 'menix'
-	rtld_include_dirs += include_directories('sysdeps/menix/include')
-	libc_include_dirs += include_directories('sysdeps/menix/include')
-	subdir('sysdeps/menix')
-elif host_machine.system() == 'nyaux'
-	rtld_include_dirs += include_directories('sysdeps/nyaux/include')
-	libc_include_dirs += include_directories('sysdeps/nyaux/include')
-	subdir('sysdeps/nyaux')
+elif host_machine.system() == 'obos'
+	rtld_include_dirs += include_directories('sysdeps/obos/include')
+	libc_include_dirs += include_directories('sysdeps/obos/include')
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
+	subdir('sysdeps/obos')
+elif host_machine.system() == 'zinnia'
+	rtld_include_dirs += include_directories('sysdeps/zinnia/include')
+	libc_include_dirs += include_directories('sysdeps/zinnia/include')
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	subdir('sysdeps/zinnia')
 elif host_machine.system() == 'horizonos'
+	rtld_include_dirs += include_directories('sysdeps/horizonos/include')
+	libc_include_dirs += include_directories('sysdeps/horizonos/include')
 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
@@ -318,15 +309,27 @@ endif
 # Configuration based on enabled options.
 #----------------------------------------------------------------------------------------
 
-posix_option = get_option('posix_option').require(sysdep_supported_options.get('posix')).allowed()
-linux_option = get_option('linux_option').require(sysdep_supported_options.get('linux')).allowed()
-glibc_option = get_option('glibc_option').require(sysdep_supported_options.get('glibc')).allowed()
-bsd_option = get_option('bsd_option').require(sysdep_supported_options.get('bsd')).allowed()
+posix_option = get_option('posix_option').require(sysdep_supported_options.get('posix', false)).allowed()
+linux_option = get_option('linux_option').require(sysdep_supported_options.get('linux', false)).allowed()
+glibc_option = get_option('glibc_option').require(sysdep_supported_options.get('glibc', false)).allowed()
+bsd_option = get_option('bsd_option').require(sysdep_supported_options.get('bsd', false)).allowed()
+linux_epoll_option = sysdep_supported_options.get('linux-epoll', linux_option)
+linux_timerfd_option = sysdep_supported_options.get('linux-timerfd', linux_option)
+linux_signalfd_option = sysdep_supported_options.get('linux-signalfd', linux_option)
+linux_eventfd_option = sysdep_supported_options.get('linux-eventfd', linux_option)
+linux_reboot_option = sysdep_supported_options.get('linux-reboot', linux_option)
+linux_wrappers_option = linux_option and sysdep_supported_options.get('linux_wrappers', false)
 
 mlibc_conf.set10('__MLIBC_POSIX_OPTION', posix_option)
 mlibc_conf.set10('__MLIBC_LINUX_OPTION', linux_option)
 mlibc_conf.set10('__MLIBC_GLIBC_OPTION', glibc_option)
 mlibc_conf.set10('__MLIBC_BSD_OPTION', bsd_option)
+mlibc_conf.set10('__MLIBC_LINUX_EPOLL_OPTION', linux_epoll_option)
+mlibc_conf.set10('__MLIBC_LINUX_TIMERFD_OPTION', linux_timerfd_option)
+mlibc_conf.set10('__MLIBC_LINUX_SIGNALFD_OPTION', linux_signalfd_option)
+mlibc_conf.set10('__MLIBC_LINUX_EVENTFD_OPTION', linux_eventfd_option)
+mlibc_conf.set10('__MLIBC_LINUX_REBOOT_OPTION', linux_reboot_option)
+mlibc_conf.set10('__MLIBC_LINUX_WRAPPERS_OPTION', linux_wrappers_option)
 mlibc_conf.set10('__MLIBC_SYSDEP_HAS_BITS_SYSCALL_H', provides_bits_syscall_h)
 
 rtld_include_dirs += include_directories('options/ansi/include')
@@ -384,9 +387,39 @@ if glibc_option
 	libc_include_dirs += include_directories('options/glibc/include')
 endif
 
+if linux_wrappers_option
+	rtld_include_dirs += include_directories('options/linux-wrappers/include')
+	libc_include_dirs += include_directories('options/linux-wrappers/include')
+endif
+
 if bsd_option
 	rtld_include_dirs += include_directories('options/bsd/include')
 	libc_include_dirs += include_directories('options/bsd/include')
+endif
+
+if linux_epoll_option
+	rtld_include_dirs += include_directories('options/linux-epoll/include')
+	libc_include_dirs += include_directories('options/linux-epoll/include')
+endif
+
+if linux_timerfd_option
+	rtld_include_dirs += include_directories('options/linux-timerfd/include')
+	libc_include_dirs += include_directories('options/linux-timerfd/include')
+endif
+
+if linux_signalfd_option
+	rtld_include_dirs += include_directories('options/linux-signalfd/include')
+	libc_include_dirs += include_directories('options/linux-signalfd/include')
+endif
+
+if linux_eventfd_option
+	rtld_include_dirs += include_directories('options/linux-eventfd/include')
+	libc_include_dirs += include_directories('options/linux-eventfd/include')
+endif
+
+if linux_reboot_option
+	rtld_include_dirs += include_directories('options/linux-reboot/include')
+	libc_include_dirs += include_directories('options/linux-reboot/include')
 endif
 
 rtld_include_dirs += include_directories('options/elf/include')
@@ -407,21 +440,27 @@ configure_file(input: 'mlibc-config.h.in',
 
 internal_sources = [
 	'options/internal/generic/allocator.cpp',
+	'options/internal/generic/c-locale-defaults.cpp',
 	'options/internal/generic/charcode.cpp',
 	'options/internal/generic/charset.cpp',
+	'options/internal/generic/ctype.cpp',
 	'options/internal/generic/debug.cpp',
 	'options/internal/generic/ensure.cpp',
 	'options/internal/generic/essential.cpp',
+	'options/internal/generic/exiting.cpp',
 	'options/internal/generic/frigg.cpp',
 	'options/internal/generic/getopt.cpp',
 	'options/internal/generic/global-config.cpp',
 	'options/internal/generic/inline-emitter.cpp',
 	'options/internal/generic/locale.cpp',
+	'options/internal/generic/locale-defaults.cpp',
 	'options/internal/generic/sigset.cpp',
 	'options/internal/generic/strings.cpp',
 	'options/internal/generic/ubsan.cpp',
 	'options/internal/generic/threads.cpp',
 	'options/internal/generic/search.cpp',
+	'options/internal/generic/stdlib.cpp',
+	'options/internal/generic/wide.cpp',
 	'options/internal/gcc/stack_protector.cpp',
 	'options/internal/gcc/guard-abi.cpp',
 	'options/internal/gcc-extra/cxxabi.cpp',
@@ -474,6 +513,7 @@ if not no_headers
 		'options/internal/include/bits/search.h',
 		'options/internal/include/bits/getopt.h',
 		'options/internal/include/bits/reclen_t.h',
+		'options/internal/include/bits/timeval.h',
 		subdir: 'bits'
 	)
 endif
@@ -500,30 +540,30 @@ subdir('options/ansi')
 subdir('options/posix')
 subdir('options/lsb')
 subdir('options/glibc')
+subdir('options/linux-wrappers')
 subdir('options/linux')
 subdir('options/bsd')
+subdir('options/linux-epoll')
+subdir('options/linux-timerfd')
+subdir('options/linux-signalfd')
+subdir('options/linux-eventfd')
+subdir('options/linux-reboot')
 
 rtlib_deps = []
 
 if not headers_only
 	if libgcc_dependency
-		libgcc = meson.get_compiler('c').find_library('gcc', required: false)
+		cpp_compiler = meson.get_compiler('cpp')
+		cpp_link_args = get_option('cpp_link_args')
+		libgcc_path = run_command(cpp_compiler.cmd_array(), cpp_link_args, '-print-libgcc-file-name',
+							capture: true, check: true).stdout().strip()
 
-		compiler_rt_name = 'libclang_rt.builtins-' + host_machine.cpu_family()
-		compiler_rt = meson.get_compiler('c').find_library(compiler_rt_name, required: false)
-
-		if not compiler_rt.found()
-			compiler_rt_name = 'libclang_rt.builtins'
-			compiler_rt = meson.get_compiler('c').find_library(compiler_rt_name, required: false)
+		if not fs.is_file(libgcc_path)
+			error('libgcc/compiler-rt library (' + libgcc_path + ') is missing')
 		endif
 
-		if libgcc.found()
-			rtlib_deps += libgcc
-		elif compiler_rt.found()
-			rtlib_deps += compiler_rt
-		else
-			error('neither libgcc nor ' + compiler_rt_name + ' was found')
-		endif
+		libgcc = declare_dependency(link_args: libgcc_path)
+		rtlib_deps += libgcc
 	endif
 
 	ld_cpp_args = [
@@ -533,16 +573,20 @@ if not headers_only
 		'-DMLIBC_BUILDING_RTLD',
 		'-Wno-extern-c-compat',
 		'-Wno-unknown-pragmas',
-	]
+	] + mlibc_c_args
 
 	libc_cpp_args = [
 		'-Wno-unknown-pragmas',
 		'-DFRG_HAVE_LIBC',
-	]
+	] + mlibc_c_args
 
 	if c_compiler.get_id() == 'clang'
 		libc_cpp_args += ['-fno-sanitize=function', '-Wno-vla-cxx-extension']
+		# Disable libstdc++ assertions to avoid undefined references to std::__glibcxx_assert_fail
+		libc_cpp_args += ['-U_GLIBCXX_ASSERTIONS', '-D_GLIBCXX_NO_ASSERTIONS']
 		ld_cpp_args += ['-fno-sanitize=function']
+	elif c_compiler.get_id() == 'gcc'
+		libc_cpp_args += ['-nostdinc']
 	endif
 
 	libc_all_sources = [
@@ -562,13 +606,16 @@ if not headers_only
 		]
 		ld_static_lib = static_library(ld_library_name, rtld_sources,
 			name_prefix: '',
-			cpp_args: ld_cpp_args + static_cpp_args,
+			cpp_args: mlibc_c_args + ld_cpp_args + static_cpp_args,
+			link_args: mlibc_link_args,
 			include_directories: rtld_include_dirs,
 			dependencies: rtld_deps + rtlib_deps,
 			install: false
 		)
 		libc_static = static_library('c', libc_all_sources,
+			c_args: mlibc_c_args,
 			cpp_args: static_cpp_args + ['-fno-stack-protector', libc_cpp_args],
+			link_args: mlibc_link_args,
 			include_directories: libc_include_dirs,
 			dependencies: libc_deps + rtlib_deps,
 			link_with: [ld_static_lib],
@@ -579,7 +626,8 @@ if not headers_only
 	if library_type in ['shared', 'both']
 		ld_shared_lib = shared_library(ld_library_name, rtld_sources + rtld_dso_sources,
 			name_prefix: '',
-			cpp_args: ld_cpp_args,
+			cpp_args: mlibc_c_args + ld_cpp_args,
+			link_args: mlibc_link_args,
 			include_directories: rtld_include_dirs,
 			dependencies: rtld_deps + rtlib_deps,
 			install: true
@@ -587,30 +635,32 @@ if not headers_only
 		hide_everything_ld = (meson.current_source_dir()
 				      / 'scripts/hide-everything.ld')
 		libc_shared = shared_library('c', libc_all_sources,
+			c_args: [mlibc_c_args],
 			cpp_args: [libc_cpp_args],
 			include_directories: libc_include_dirs,
 			dependencies: libc_deps + rtlib_deps,
 			link_with: [ld_shared_lib],
 			link_whole: libc_sublibs,
-			link_args: ['-Wl,--version-script,' + hide_everything_ld],
+			link_args: ['-Wl,--version-script,' + hide_everything_ld, mlibc_link_args],
 			link_depends: [hide_everything_ld],
 			install: true
 		)
 	endif
 
-	library('pthread', 'dummy-libs/libpthread/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('rt', 'dummy-libs/librt/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('util', 'dummy-libs/libutil/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('m', 'dummy-libs/libm/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('resolv', 'dummy-libs/libresolv/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('dl', 'dummy-libs/libdl/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('ssp', 'dummy-libs/libssp/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
-	library('ssp_nonshared', 'dummy-libs/libssp_nonshared/src/dummy.cpp', cpp_args: libc_cpp_args, install: true)
+	library('pthread', 'dummy-libs/libpthread/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('rt', 'dummy-libs/librt/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('util', 'dummy-libs/libutil/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('m', 'dummy-libs/libm/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('resolv', 'dummy-libs/libresolv/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('dl', 'dummy-libs/libdl/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('ssp', 'dummy-libs/libssp/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	library('ssp_nonshared', 'dummy-libs/libssp_nonshared/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
 endif
 
 summary_info = {}
 summary_info += {'Build tests': build_tests}
 summary_info += {'Build host-libc tests': build_tests_host_libc}
+summary_info += {'Build cross-libc tests': build_tests_cross_libc}
 summary(summary_info, bool_yn: true, section: 'tests')
 
 summary_info = {}

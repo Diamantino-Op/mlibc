@@ -1,5 +1,5 @@
-#ifndef _ASTRAL_ARCHCTL_H
-#define _ASTRAL_ARCHCTL_H
+#ifndef _HORIZONOS_ARCHCTL_H
+#define _HORIZONOS_ARCHCTL_H
 
 #define ARCH_CTL_SET_GSBASE 0
 #define ARCH_CTL_SET_FSBASE 1
@@ -20,4 +20,4 @@ int arch_ctl(int, void *);
 }
 #endif
 
-#endif /* _ASTRAL_ARCH_CTLH */
+#endif /* _HORIZONOS_ARCH_CTLH */

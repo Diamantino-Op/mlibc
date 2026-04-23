@@ -23,34 +23,36 @@ extern "C" void __mlibc_signal_restore();
 
 namespace mlibc {
 
-int sys_sigprocmask(int how, const sigset_t *set, sigset_t *retrieve) {
+int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *set, sigset_t *retrieve) {
 	// This implementation is inherently signal-safe.
-	uint64_t former, unused;
+	uint64_t err, former, unused;
 	if (set) {
-		HEL_CHECK(helSyscall2_2(
+		HEL_CHECK(helSyscall2_3(
 		    kHelObserveSuperCall + posix::superSigMask,
 		    how,
 		    *reinterpret_cast<const HelWord *>(set),
+		    &err,
 		    &former,
 		    &unused
 		));
 	} else {
-		HEL_CHECK(helSyscall2_2(kHelObserveSuperCall + posix::superSigMask, 0, 0, &former, &unused)
+		HEL_CHECK(
+		    helSyscall2_3(kHelObserveSuperCall + posix::superSigMask, 0, 0, &err, &former, &unused)
 		);
 	}
-	if (retrieve)
+	if (retrieve && err == 0)
 		*reinterpret_cast<uint64_t *>(retrieve) = former;
-	return 0;
+	return err;
 }
 
-int sys_sigaction(
+int Sysdeps<Sigaction>::operator()(
     int number, const struct sigaction *__restrict action, struct sigaction *__restrict saved_action
 ) {
 	SignalGuard sguard;
 
 	// TODO: Respect restorer. __ensure(!(action->sa_flags & SA_RESTORER));
 
-	managarm::posix::CntRequest<MemoryAllocator> req(getSysdepsAllocator());
+	managarm::posix::CntRequest<SysdepsAllocator> req(getSysdepsAllocator());
 	req.set_request_type(managarm::posix::CntReqType::SIG_ACTION);
 	req.set_sig_number(number);
 	if (action) {
@@ -77,7 +79,7 @@ int sys_sigaction(
 	HEL_CHECK(send_req.error());
 	HEL_CHECK(recv_resp.error());
 
-	managarm::posix::SvrResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	managarm::posix::SvrResponse<SysdepsAllocator> resp(getSysdepsAllocator());
 	resp.ParseFromArray(recv_resp.data(), recv_resp.length());
 
 	if (resp.error() == managarm::posix::Errors::ILLEGAL_REQUEST) {
@@ -102,16 +104,35 @@ int sys_sigaction(
 	return 0;
 }
 
-int sys_kill(int pid, int number) {
+int Sysdeps<Kill>::operator()(pid_t pid, int number) {
 	// This implementation is inherently signal-safe.
 	HelWord out;
-	HEL_CHECK(helSyscall2_1(kHelObserveSuperCall + posix::superSigKill, pid, number, &out));
+	HEL_CHECK(helSyscall4_1(
+	    kHelObserveSuperCall + posix::superSigKill,
+	    std::to_underlying(posix::SuperKillMode::Kill),
+	    pid,
+	    0,
+	    number,
+	    &out
+	));
 	return out;
 }
 
-int sys_tgkill(int, int tid, int number) { return sys_kill(tid, number); }
+int Sysdeps<Tgkill>::operator()(int pid, int tid, int number) {
+	// This implementation is inherently signal-safe.
+	HelWord out;
+	HEL_CHECK(helSyscall4_1(
+	    kHelObserveSuperCall + posix::superSigKill,
+	    std::to_underlying(posix::SuperKillMode::Kill),
+	    pid,
+	    tid,
+	    number,
+	    &out
+	));
+	return out;
+}
 
-int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
+int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
 	HelWord out;
 
 	// This implementation is inherently signal-safe.
@@ -125,26 +146,32 @@ int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
 	return out;
 }
 
-int sys_sigsuspend(const sigset_t *set) {
-	// SignalGuard sguard;
-	uint64_t former, seq, unused;
+int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
+	// TODO: this only handles cancellations up to this point; the syscall does not get cancelled
+	SignalGuard sguard;
+	mlibc::thread_testcancel();
 
-	HEL_CHECK(helSyscall2_2(
+	uint64_t err, former, seq, unused;
+
+	HEL_CHECK(helSyscall2_3(
 	    kHelObserveSuperCall + posix::superSigMask,
 	    SIG_SETMASK,
 	    *reinterpret_cast<const HelWord *>(set),
+	    &err,
 	    &former,
 	    &seq
 	));
+	__ensure(err == 0);
 	HEL_CHECK(helSyscall1(kHelObserveSuperCall + posix::superSigSuspend, seq));
-	HEL_CHECK(helSyscall2_2(
-	    kHelObserveSuperCall + posix::superSigMask, SIG_SETMASK, former, &unused, &unused
+	HEL_CHECK(helSyscall2_3(
+	    kHelObserveSuperCall + posix::superSigMask, SIG_SETMASK, former, &err, &unused, &unused
 	));
+	__ensure(err == 0);
 
 	return EINTR;
 }
 
-int sys_sigpending(sigset_t *set) {
+int Sysdeps<Sigpending>::operator()(sigset_t *set) {
 	uint64_t pendingMask;
 
 	HEL_CHECK(helSyscall0_1(kHelObserveSuperCall + posix::superSigGetPending, &pendingMask));
@@ -153,25 +180,34 @@ int sys_sigpending(sigset_t *set) {
 	return 0;
 }
 
-int sys_pause() {
+int Sysdeps<Pause>::operator()() {
+	// TODO: this only handles cancellations up to this point; the syscall does not get cancelled
+	SignalGuard sguard;
+	mlibc::thread_testcancel();
+
 	HelWord set = 0;
-	uint64_t former, seq;
+	uint64_t err, former, seq;
 
 	// no-op to obtain a seqnum
 	HEL_CHECK(
-	    helSyscall2_2(kHelObserveSuperCall + posix::superSigMask, SIG_BLOCK, set, &former, &seq)
+	    helSyscall2_3(kHelObserveSuperCall + posix::superSigMask, SIG_BLOCK, set, &err, &former, &seq)
 	);
+	__ensure(err == 0);
 	HEL_CHECK(helSyscall1(kHelObserveSuperCall + posix::superSigSuspend, seq));
 
 	return EINTR;
 }
 
-int sys_sigtimedwait(
+int Sysdeps<Sigtimedwait>::operator()(
     const sigset_t *__restrict set,
     siginfo_t *__restrict info,
     const struct timespec *__restrict timeout,
     int *out_signal
 ) {
+	// TODO: this only handles cancellations up to this point; the syscall does not get cancelled
+	SignalGuard sguard;
+	mlibc::thread_testcancel();
+
 	uint64_t nanos = timeout ? (timeout->tv_nsec + timeout->tv_sec * 1'000'000'000) : UINT64_MAX;
 	HelWord status;
 	HelWord signal;
@@ -190,6 +226,28 @@ int sys_sigtimedwait(
 
 	*out_signal = signal;
 	return 0;
+}
+
+int Sysdeps<Sigqueue>::operator()(pid_t pid, int sig, const union sigval val) {
+	// This implementation is inherently signal-safe.
+	HelWord out;
+
+	siginfo_t info{};
+	info.si_code = SI_QUEUE;
+	info.si_signo = sig;
+	info.si_pid = getpid();
+	info.si_uid = getuid();
+	info.si_value = val;
+
+	HEL_CHECK(helSyscall4_1(
+	    kHelObserveSuperCall + posix::superSigKill,
+	    std::to_underlying(posix::SuperKillMode::QueueInfo),
+	    pid,
+	    0,
+	    reinterpret_cast<HelWord>(&info),
+	    &out
+	));
+	return out;
 }
 
 } // namespace mlibc

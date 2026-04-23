@@ -1,10 +1,13 @@
 #include <ctype.h>
+#include <errno.h>
 #include <langinfo.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 #include <bits/ensure.h>
+#include <mlibc/debug.hpp>
+#include <mlibc/time.hpp>
 #include <mlibc/strings.hpp>
 
 namespace {
@@ -504,7 +507,11 @@ char *strptime(const char *__restrict s, const char *__restrict format, struct t
 	return result;
 }
 
+size_t strftime_l(char *__restrict s, size_t maxsize, const char *__restrict format, const struct tm *__restrict timeptr, locale_t l) {
+	return mlibc::strftime(s, maxsize, format, timeptr, static_cast<mlibc::localeinfo *>(l));
+}
+
 int clock_getcpuclockid(pid_t, clockid_t *) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+	mlibc::infoLogger() << "mlibc: clock_getcpuclockid unconditionally returns ENOSYS" << frg::endlog;
+	return ENOSYS;
 }

@@ -2,12 +2,13 @@
 #ifndef _SCHED_H
 #define _SCHED_H
 
+#include <mlibc-config.h>
+
 #include <abi-bits/pid_t.h>
 #include <bits/ansi/time_t.h>
 #include <bits/ansi/timespec.h>
 #include <bits/threads.h>
 #include <bits/size_t.h>
-#include <mlibc-config.h>
 
 /* MISSING: parts of POSIX [PS], [SS] and [TSP] options */
 
@@ -28,6 +29,12 @@ extern "C" {
 #define SCHED_DEADLINE 6
 #define SCHED_RESET_ON_FORK 0x40000000
 
+/* KEEP IN SYNC WITH `struct __mlibc_sched_param`! */
+struct sched_param {
+	int sched_priority;
+	/* TODO: add missing [SS|TSP] fields */
+};
+
 #ifndef __MLIBC_ABI_ONLY
 
 int sched_yield(void);
@@ -36,6 +43,7 @@ int sched_get_priority_max(int __policy);
 int sched_get_priority_min(int __policy);
 
 int sched_setscheduler(pid_t __pid, int __policy, const struct sched_param *__param);
+int sched_getscheduler(pid_t __pid);
 
 int sched_getparam(pid_t __pid, struct sched_param *__param);
 int sched_setparam(pid_t __pid, const struct sched_param *__param);
