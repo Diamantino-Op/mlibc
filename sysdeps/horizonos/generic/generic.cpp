@@ -454,9 +454,13 @@ namespace mlibc {
 	extern "C" void __mlibc_thread_entry();
 
 	int sys_clone(void *tcb, pid_t *pid_out, void *stack) {
-		(void)tcb;
 		long ret;
-		long err = syscall(SYSCALL_NEWTHREAD, &ret, (uintptr_t)__mlibc_thread_entry, (uintptr_t)stack);
+		auto *newTcb = reinterpret_cast<Tcb *>(tcb);
+		long err = syscall(SYSCALL_NEWTHREAD, &ret,
+			(uintptr_t)__mlibc_thread_entry,
+			(uintptr_t)stack,
+			(uintptr_t)newTcb->stackAddr,
+			newTcb->stackSize);
 		*pid_out = ret;
 		return err;
 	}
