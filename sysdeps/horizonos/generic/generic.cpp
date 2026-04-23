@@ -157,7 +157,7 @@ namespace mlibc {
 		ts.tv_sec = *secs;
 		ts.tv_nsec = *nanos;
 		long ret;
-		long err = syscall(SYSCALL_NANOSLEEP, &ret, (uintptr_t)&ts);
+		long err = syscall(SYSCALL_NANOSLEEP, &ret, (uintptr_t)&ts, (uintptr_t)&ts);
 		*secs = ts.tv_sec;
 		*nanos = ts.tv_nsec;
 		return err;
