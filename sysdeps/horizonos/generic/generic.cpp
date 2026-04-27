@@ -247,7 +247,6 @@ namespace mlibc {
 		return sysdep<VmUnmap>(pointer, size);
 	}
 
-// Stubs
 #ifndef MLIBC_BUILDING_RTLD
 	extern "C" void __mlibc_restorer();
 
@@ -268,6 +267,14 @@ namespace mlibc {
 	}
 #endif
 
+	// IsaTTY
+
+	int Sysdeps<Isatty>::operator()(int fd) {
+		long ret;
+		return syscall(SYSCALL_ISATTY, &ret, fd);
+	}
+
+	// Stubs
 	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
 		(void)size;
 		(void)list;
@@ -853,11 +860,6 @@ namespace mlibc {
 		(void)old_path;
 		(void)newdirfd;
 		(void)new_path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Isatty>::operator()(int fd) {
-		(void)fd;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
