@@ -153,13 +153,14 @@ namespace mlibc {
 	// Messages
 
 	int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
-		struct timespec ts;
-		ts.tv_sec = *secs;
-		ts.tv_nsec = *nanos;
 		long ret;
-		long err = syscall(SYSCALL_NANOSLEEP, &ret, (uintptr_t)&ts);
-		*secs = ts.tv_sec;
-		*nanos = ts.tv_nsec;
+		long err = syscall(SYSCALL_NANOSLEEP, &ret, *secs, *nanos);
+
+		if (err == 0) {
+			*secs = 0;
+			*nanos = 0;
+		}
+
 		return err;
 	}
 
@@ -1088,76 +1089,6 @@ namespace mlibc {
 			return ERANGE;
 		}
 
-		return 0;
-	}
-#endif*/
-
-/*#ifndef MLIBC_BUILDING_RTLD
-	int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set, fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
-		pollfd *fds = (pollfd *)malloc(num_fds * sizeof(pollfd));
-
-		if(fds == NULL)
-			return ENOMEM;
-
-		int actual_count = 0;
-
-		for(int fd = 0; fd < num_fds; ++fd) {
-			short events = 0;
-			if(read_set && FD_ISSET(fd, read_set)) {
-				events |= POLLIN;
-			}
-
-			if(write_set && FD_ISSET(fd, write_set)) {
-				events |= POLLOUT;
-			}
-
-			if(except_set && FD_ISSET(fd, except_set)) {
-				events |= POLLPRI;
-			}
-
-			if(events) {
-				fds[actual_count].fd = fd;
-				fds[actual_count].events = events;
-				fds[actual_count].revents = 0;
-				actual_count++;
-			}
-		}
-
-		int num;
-		int err = sysdep<Ppoll>(fds, actual_count, timeout, sigmask, &num);
-
-		if(err) {
-			free(fds);
-			return err;
-		}
-
-		#define READ_SET_POLLSTUFF (POLLIN | POLLHUP | POLLERR)
-		#define WRITE_SET_POLLSTUFF (POLLOUT | POLLERR)
-		#define EXCEPT_SET_POLLSTUFF (POLLPRI)
-
-		int return_count = 0;
-		for(int fd = 0; fd < actual_count; ++fd) {
-			int events = fds[fd].events;
-			if((events & POLLIN) && (fds[fd].revents & READ_SET_POLLSTUFF) == 0) {
-				FD_CLR(fds[fd].fd, read_set);
-				events &= ~POLLIN;
-			}
-
-			if((events & POLLOUT) && (fds[fd].revents & WRITE_SET_POLLSTUFF) == 0) {
-				FD_CLR(fds[fd].fd, write_set);
-				events &= ~POLLOUT;
-			}
-
-			if((events & POLLPRI) && (fds[fd].revents & EXCEPT_SET_POLLSTUFF) == 0) {
-				FD_CLR(fds[fd].fd, except_set);
-				events &= ~POLLPRI;
-			}
-
-			if(events)
-				return_count++;
-		}
-		*num_events = return_count;
-		free(fds);
 		return 0;
 	}
 #endif*/
