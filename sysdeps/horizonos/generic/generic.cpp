@@ -165,13 +165,15 @@ namespace mlibc {
 	}
 
 	pid_t Sysdeps<GetPid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		long ret;
+		syscall(SYSCALL_GETPID, &ret);
+
+		return ret;
 	}
 
 	int Sysdeps<Kill>::operator()(pid_t pid, int signal) {
-		(void)pid;
-		(void)signal;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		long ret;
+		return syscall(SYSCALL_KILL, &ret, pid, signal);
 	}
 
 	// Futex
@@ -273,6 +275,18 @@ namespace mlibc {
 	int Sysdeps<Isatty>::operator()(int fd) {
 		long ret;
 		return syscall(SYSCALL_ISATTY, &ret, fd);
+	}
+
+	// IO
+
+	int Sysdeps<Ioperm>::operator()(unsigned long int from, unsigned long int num, int state) {
+		long ret;
+		return syscall(SYSCALL_IOPERM, &ret, from, num, state);
+	}
+
+	int Sysdeps<Iopl>::operator()(int level) {
+		long ret;
+		return syscall(SYSCALL_IOPL, &ret, level);
 	}
 
 	// Stubs

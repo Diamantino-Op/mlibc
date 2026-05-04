@@ -135,7 +135,9 @@ struct HorizonOSSysdepTags :
 	VmUnmap,
 	Isatty,
 	ClockGet,
-	PrepareStack
+	PrepareStack,
+	Iopl,
+	Ioperm
 {};
 
 template<typename Tag>
