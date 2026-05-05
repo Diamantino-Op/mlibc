@@ -23,12 +23,12 @@ int register_horizonos_port(int port) {
 
 int send_horizonos_message(int port, const struct hos_msg *hdr) {
 	long ret;
-	return syscall(SYSCALL_SENDMSG, &ret, port, (uint64_t)hdr);
+	return syscall(SYSCALL_SENDMSG, &ret, port, reinterpret_cast<uint64_t>(hdr));
 }
 
 int receive_horizonos_message(int port, struct hos_msg *hdr) {
 	long ret;
-	return syscall(SYSCALL_RECVMSG, &ret, port, (uint64_t)hdr);
+	return syscall(SYSCALL_RECVMSG, &ret, port, reinterpret_cast<uint64_t>(hdr));
 }
 
 int is_thread_alive(int tid, bool *alive) {
@@ -37,6 +37,14 @@ int is_thread_alive(int tid, bool *alive) {
 	*alive = ret != 0;
 
 	return err;
+}
+
+int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr) {
+	return syscall(SYSCALL_MMAPPHYS, reinterpret_cast<long *>(retAddr), physAddr, len);
+}
+
+int get_rsdp(uint64_t *rsdpAddr) {
+	return syscall(SYSCALL_GETRSDP, reinterpret_cast<long *>(rsdpAddr));
 }
 
 namespace mlibc {
@@ -49,7 +57,7 @@ namespace mlibc {
 
 	void Sysdeps<LibcLog>::operator()(const char *message) {
 		long ret;
-		syscall(SYSCALL_PRINT, &ret, (uint64_t)message);
+		syscall(SYSCALL_PRINT, &ret, reinterpret_cast<uint64_t>(message));
 	}
 
 	[[noreturn]] void Sysdeps<LibcPanic>::operator()() {
@@ -61,7 +69,7 @@ namespace mlibc {
 
 	int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
 		long ret;
-		long err = syscall(SYSCALL_MMAP, &ret, (uint64_t)hint, size, prot, flags, fd, offset);
+		long err = syscall(SYSCALL_MMAP, &ret, reinterpret_cast<uint64_t>(hint), size, prot, flags, fd, offset);
 		*window = (void *)ret;
 		return err;
 	}
@@ -70,14 +78,14 @@ namespace mlibc {
 
 	int Sysdeps<VmUnmap>::operator()(void *pointer, size_t size) {
 		long ret;
-		return syscall(SYSCALL_MUNMAP, &ret, (uintptr_t)pointer, size);
+		return syscall(SYSCALL_MUNMAP, &ret, reinterpret_cast<uintptr_t>(pointer), size);
 	}
 
 	// Protect
 
 	int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
 		long ret;
-		return syscall(SYSCALL_MPROTECT, &ret, (uint64_t)pointer, size, prot);
+		return syscall(SYSCALL_MPROTECT, &ret, reinterpret_cast<uint64_t>(pointer), size, prot);
 	}
 
 	// Get TID
@@ -98,7 +106,8 @@ namespace mlibc {
 
 	int Sysdeps<TcbSet>::operator()(void *pointer) {
 		long r;
-		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, (uint64_t)pointer);
+		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, reinterpret_cast<uint64_t>(pointer)
+	    );
 	}
 
 	// Exit
@@ -113,7 +122,7 @@ namespace mlibc {
 	int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
 		struct timespec ts;
 		long ret;
-		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, (uint64_t)&ts);
+		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, reinterpret_cast<uint64_t>(&ts));
 		*secs = ts.tv_sec;
 		*nanos = ts.tv_nsec;
 		return err;
@@ -123,7 +132,7 @@ namespace mlibc {
 
 	int Sysdeps<Sysinfo>::operator()(struct sysinfo *info) {
 		long r;
-		return syscall(SYSCALL_SYSINFO, &r, (uint64_t)info);
+		return syscall(SYSCALL_SYSINFO, &r, reinterpret_cast<uint64_t>(info));
 	}
 
 	// Get CPU

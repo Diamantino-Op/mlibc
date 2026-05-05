@@ -11,6 +11,8 @@ int register_horizonos_port(int port);
 int send_horizonos_message(int port, const struct hos_msg *hdr);
 int receive_horizonos_message(int port, struct hos_msg *hdr);
 int is_thread_alive(int tid, bool *alive);
+int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr);
+int get_rsdp(uint64_t *rsdpAddr);
 
 #ifdef __cplusplus
 }
