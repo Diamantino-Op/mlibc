@@ -66,6 +66,11 @@ int get_irq_mode(long *mode) {
 	return syscall(SYSCALL_GETIRQMODE, mode);
 }
 
+int set_int_status(bool status) {
+	long ret;
+	return syscall(SYSCALL_SETINTSTATUS, &ret, status);
+}
+
 namespace mlibc {
 	[[noreturn]] static void panic_unimplemented_sysdep(const char *name) {
 		mlibc::panicLogger() << "mlibc: unimplemented sysdep " << name << frg::endlog;
@@ -138,20 +143,21 @@ namespace mlibc {
 
 	// Get Clock
 
-	int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
+	int Sysdeps<ClockGet>::operator()(const int clock, time_t *secs, long *nanos) {
 		if (secs == nullptr || nanos == nullptr) {
 			return EFAULT;
 		}
 
-		struct timespec ts {};
 		long ret;
-		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, reinterpret_cast<uint64_t>(&ts));
+		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, reinterpret_cast<uint64_t>(secs), reinterpret_cast<uint64_t>(nanos));
+
 		if (err != 0) {
+			*secs = -1;
+			*nanos = -1;
+
 			return err;
 		}
 
-		*secs = ts.tv_sec;
-		*nanos = ts.tv_nsec;
 		return 0;
 	}
 

@@ -53,12 +53,20 @@ struct CollationPolicy<wchar_t> {
 	using StringType = wchar_t;
 	using UCharType = wint_t;
 
-	static frg::span<const wint_t> getWeight(const mlibc::localeinfo *l) {
-		return l->collate.get(_NL_COLLATE_WEIGHTWC).asUint32Span();
+	static auto getWeight(const mlibc::localeinfo *l) {
+		if constexpr (std::is_signed_v<wint_t>) {
+			return l->collate.get(_NL_COLLATE_WEIGHTWC).asInt32Span();
+		} else {
+			return l->collate.get(_NL_COLLATE_WEIGHTWC).asUint32Span();
+		}
 	}
 
-	static frg::span<const wint_t> getExtra(const mlibc::localeinfo *l) {
-		return l->collate.get(_NL_COLLATE_EXTRAWC).asUint32Span();
+	static auto getExtra(const mlibc::localeinfo *l) {
+		if constexpr (std::is_signed_v<wint_t>) {
+			return l->collate.get(_NL_COLLATE_EXTRAWC).asInt32Span();
+		} else {
+			return l->collate.get(_NL_COLLATE_EXTRAWC).asUint32Span();
+		}
 	}
 };
 

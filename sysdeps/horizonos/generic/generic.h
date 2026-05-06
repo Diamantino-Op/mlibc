@@ -16,6 +16,7 @@ int get_rsdp(uint64_t *rsdpAddr);
 int install_irq_handler(uint32_t irq, uint32_t(*handler)(void *), void *ctx, void *handlerOut);
 int uninstall_irq_handler(uint32_t(*handler)(void *), void *handle);
 int get_irq_mode(long *mode);
+int set_int_status(bool status);
 
 #ifdef __cplusplus
 }
