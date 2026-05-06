@@ -3,20 +3,26 @@
 #endif
 
 #include <bits/ensure.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <signal.h>
+#include <wchar.h>
 
+#include <mlibc/collation.hpp>
 #include <mlibc/debug.hpp>
+#include <mlibc/locale.hpp>
 #include <mlibc/strings.hpp>
 
 char *strdup(const char *string) {
 	auto num_bytes = strlen(string);
 
 	char *new_string = (char *)malloc(num_bytes + 1);
-	if(!new_string) // TODO: set errno
+	if(!new_string) {
+		errno = ENOMEM;
 		return nullptr;
+	}
 
 	memcpy(new_string, string, num_bytes);
 	new_string[num_bytes] = 0;
@@ -26,8 +32,10 @@ char *strdup(const char *string) {
 char *strndup(const char *string, size_t max_size) {
 	auto num_bytes = strnlen(string, max_size);
 	char *new_string = (char *)malloc(num_bytes + 1);
-	if(!new_string) // TODO: set errno
+	if(!new_string) {
+		errno = ENOMEM;
 		return nullptr;
+	}
 
 	memcpy(new_string, string, num_bytes);
 	new_string[num_bytes] = 0;
@@ -41,18 +49,7 @@ char *stpcpy(char *__restrict dest, const char *__restrict src) {
 }
 
 char *stpncpy(char *__restrict dest, const char *__restrict src, size_t n) {
-	size_t nulls, copied, srcLen = strlen(src);
-	if (n >= srcLen) {
-		nulls = n - srcLen;
-		copied = srcLen;
-	} else {
-		nulls = 0;
-		copied = n;
-	}
-
-	memcpy(dest, src, copied);
-	memset(dest + srcLen, 0, nulls);
-	return dest + n - nulls;
+	return mlibc::stpncpy(dest, src, n);
 }
 
 size_t strnlen(const char *s, size_t n) {
@@ -205,17 +202,27 @@ size_t strlcat(char *d, const char *s, size_t n) {
 	return l + mlibc::strlcpy(d + l, s, n - l);
 }
 
-int wcscoll_l(const wchar_t *l, const wchar_t *r, locale_t) {
-	// TODO: fix once we implement collation
-	return wcscmp(l, r);
+int wcscoll_l(const wchar_t *a, const wchar_t *b, locale_t loc) {
+	const auto l = static_cast<const mlibc::localeinfo *>(loc);
+	return mlibc::strcoll<wchar_t>(a, b, l);
 }
 
-size_t wcsxfrm_l(wchar_t *__restrict dest, const wchar_t *__restrict src, size_t size, locale_t) {
-	// TODO: fix once we implement collation
-	return wcsxfrm(dest, src, size);
-}
+size_t wcsxfrm_l(wchar_t *__restrict dest, const wchar_t *__restrict src, size_t size, locale_t loc) {
+	auto l = static_cast<mlibc::localeinfo *>(loc);
 
-size_t strxfrm_l(char *__restrict dest, const char *__restrict src, size_t max_size, locale_t *) {
-	// TODO: fix once we implement collation
-	return strxfrm(dest, src, max_size);
+	auto nrules = l->collate.get(_NL_COLLATE_NRULES).asUint32();
+	if (nrules == 0) {
+		size_t len = wcslen(src);
+		if (size)
+			wcpncpy(dest, src, frg::min(len + 1, size));
+		return len;
+	}
+
+	if (*src == L'\0') {
+		if (size)
+			*dest = L'\0';
+		return 0;
+	}
+
+	return mlibc::do_xfrm<wchar_t>(reinterpret_cast<const wint_t *>(src), dest, size, mlibc::coll_context<wchar_t>::from_localeinfo(l));
 }

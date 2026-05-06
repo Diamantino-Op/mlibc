@@ -51,4 +51,12 @@ int iswascii(int nc) {
 	return cp <= 0x7F;
 }
 
+int iswspace_l(wint_t nc, localeinfo *loc) {
+	auto cc = mlibc::platform_wide_charcode();
+	mlibc::codepoint cp;
+	if(auto e = cc->promote(nc, cp); e != mlibc::transcode_status::input_exhausted)
+		return 0;
+	return mlibc::current_charset()->is_space(cp, static_cast<mlibc::localeinfo *>(loc));
+}
+
 } // namespace mlibc

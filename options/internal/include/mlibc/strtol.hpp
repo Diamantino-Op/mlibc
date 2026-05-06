@@ -1,11 +1,14 @@
-#ifndef MLIBC_STRTOL_HPP
-#define MLIBC_STRTOL_HPP
+#pragma once
 
-#include <type_traits>
 #include <ctype.h>
 #include <errno.h>
-#include <wctype.h>
 #include <limits.h>
+#include <mlibc/ctype.hpp>
+#include <mlibc/charcode.hpp>
+#include <mlibc/charset.hpp>
+#include <mlibc/locale.hpp>
+#include <type_traits>
+#include <wctype.h>
 
 namespace mlibc {
 
@@ -39,7 +42,7 @@ template<typename T> struct char_detail {};
 
 template<>
 struct char_detail<char> {
-	static bool isSpace(char c) { return isspace(c); }
+	static bool isSpace(char c, localeinfo *l) { return mlibc::isspace_l(c, l); }
 	static bool isDigit(char c) { return isdigit(c); }
 	static bool isHexDigit(char c) { return isxdigit(c); }
 	static bool isLower(char c) { return islower(c); }
@@ -48,7 +51,7 @@ struct char_detail<char> {
 
 template<>
 struct char_detail<wchar_t> {
-	static bool isSpace(wchar_t c) { return iswspace(c); }
+	static bool isSpace(wchar_t wc, localeinfo *l) { return mlibc::iswspace_l(wc, l); }
 	static bool isDigit(wchar_t c) { return iswdigit(c); }
 	static bool isHexDigit(wchar_t c) { return iswxdigit(c); }
 	static bool isLower(wchar_t c) { return iswlower(c); }
@@ -58,7 +61,7 @@ struct char_detail<wchar_t> {
 template<typename Char> Char widen(char c) { return static_cast<Char>(c); }
 
 template<typename Return, typename Char>
-Return stringToInteger(const Char *__restrict nptr, Char **__restrict endptr, int baseInt) {
+Return stringToInteger(const Char *__restrict nptr, Char **__restrict endptr, int baseInt, localeinfo *l = getActiveLocale()) {
 	using UnsignedReturn = std::make_unsigned_t<Return>;
 
 	auto base = static_cast<Return>(baseInt);
@@ -70,7 +73,7 @@ Return stringToInteger(const Char *__restrict nptr, Char **__restrict endptr, in
 		return 0;
 	}
 
-	while (char_detail<Char>::isSpace(*s))
+	while (char_detail<Char>::isSpace(*s, l))
 		s++;
 
 	bool negative = false;
@@ -98,7 +101,7 @@ Return stringToInteger(const Char *__restrict nptr, Char **__restrict endptr, in
 		base = 2;
 	} else if ((base == 0 || base == 8) && hasOctalPrefix) {
 		base = 8;
-	} else if (base == 0) { 
+	} else if (base == 0) {
 		base = 10;
 	}
 
@@ -159,6 +162,4 @@ Return stringToInteger(const Char *__restrict nptr, Char **__restrict endptr, in
 	return negative ? -totalValue : totalValue;
 }
 
-}
-
-#endif // MLIBC_STRTOL_HPP
+} // namespace mlibc

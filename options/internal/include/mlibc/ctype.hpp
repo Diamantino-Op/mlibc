@@ -12,5 +12,6 @@ int isxdigit_l(int c, localeinfo *l);
 int tolower_l(int c, localeinfo *l);
 
 int iswascii(int nc);
+int iswspace_l(wint_t nc, localeinfo *l);
 
 } // namespace mlibc
