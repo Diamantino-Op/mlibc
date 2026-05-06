@@ -33,21 +33,30 @@
 #define SYSCALL_GETPID 26
 #define SYSCALL_MMAPPHYS 27
 #define SYSCALL_GETRSDP 28
+#define SYSCALL_INSTALLIRQHANDLER 29
+#define SYSCALL_UNINSTALLIRQHANDLER 30
+#define SYSCALL_GETIRQMODE 31
 
 #ifndef __MLIBC_ABI_ONLY
 
 static long syscall(long func, long* ret, uint64_t p1 = 0, uint64_t p2 = 0, uint64_t p3 = 0, uint64_t p4 = 0, uint64_t p5 = 0, uint64_t p6 = 0) {
 	volatile long err;
+	long result;
 
 	register uint64_t r4 asm("r10") = p4;
 	register uint64_t r5 asm("r8") = p5;
 	register uint64_t r6 asm("r9") = p6;
 
 	asm volatile("syscall"
-		: "=a"(*ret), "=d"(err)
+		: "=a"(result), "=d"(err)
 		: "a"(func), "D"(p1), "S"(p2), "d"(p3), "r"(r4),
 		"r"(r5), "r"(r6)
 		: "memory", "rcx", "r11");
+
+	if (ret != nullptr) {
+		*ret = result;
+	}
+
     return err;
 }
 

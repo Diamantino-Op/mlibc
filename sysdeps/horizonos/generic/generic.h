@@ -13,6 +13,9 @@ int receive_horizonos_message(int port, struct hos_msg *hdr);
 int is_thread_alive(int tid, bool *alive);
 int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr);
 int get_rsdp(uint64_t *rsdpAddr);
+int install_irq_handler(uint32_t irq, uint32_t(*handler)(void *), void *ctx, void *handlerOut);
+int uninstall_irq_handler(uint32_t(*handler)(void *), void *handle);
+int get_irq_mode(long *mode);
 
 #ifdef __cplusplus
 }
