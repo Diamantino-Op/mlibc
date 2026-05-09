@@ -21,9 +21,9 @@ int register_horizonos_port(int port) {
 	return syscall(SYSCALL_PORTREGISTER, &ret, port);
 }
 
-int send_horizonos_message(int port, const struct hos_msg *hdr) {
+int send_horizonos_message(int sendPort, int port, const struct hos_msg *hdr) {
 	long ret;
-	return syscall(SYSCALL_SENDMSG, &ret, port, reinterpret_cast<uint64_t>(hdr));
+	return syscall(SYSCALL_SENDMSG, &ret, sendPort, port, reinterpret_cast<uint64_t>(hdr));
 }
 
 int receive_horizonos_message(int port, struct hos_msg *hdr) {
