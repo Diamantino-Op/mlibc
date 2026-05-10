@@ -16,9 +16,8 @@
 #include <dirent.h>
 #include <mlibc/tcb.hpp>
 
-int register_horizonos_port(int port) {
-	long ret;
-	return syscall(SYSCALL_PORTREGISTER, &ret, port);
+int register_horizonos_port(long *ret) {
+	return syscall(SYSCALL_PORTREGISTER, ret);
 }
 
 int send_horizonos_message(int sendPort, int port, const struct hos_msg *hdr) {
@@ -26,9 +25,9 @@ int send_horizonos_message(int sendPort, int port, const struct hos_msg *hdr) {
 	return syscall(SYSCALL_SENDMSG, &ret, sendPort, port, reinterpret_cast<uint64_t>(hdr));
 }
 
-int receive_horizonos_message(int port, struct hos_msg *hdr) {
+int receive_horizonos_message(int port, struct hos_msg *hdr, filter_options *options) {
 	long ret;
-	return syscall(SYSCALL_RECVMSG, &ret, port, reinterpret_cast<uint64_t>(hdr));
+	return syscall(SYSCALL_RECVMSG, &ret, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
 }
 
 int is_thread_alive(int tid, bool *alive) {
