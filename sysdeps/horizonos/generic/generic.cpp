@@ -20,12 +20,12 @@ int register_horizonos_port(long *ret) {
 	return syscall(SYSCALL_PORTREGISTER, ret);
 }
 
-int send_horizonos_message(int sendPort, int port, const struct hos_msg *hdr) {
+int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr) {
 	long ret;
 	return syscall(SYSCALL_SENDMSG, &ret, sendPort, port, reinterpret_cast<uint64_t>(hdr));
 }
 
-int receive_horizonos_message(int port, struct hos_msg *hdr, filter_options *options) {
+int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options) {
 	long ret;
 	return syscall(SYSCALL_RECVMSG, &ret, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
 }
