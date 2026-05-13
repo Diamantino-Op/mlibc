@@ -16,8 +16,8 @@
 #include <dirent.h>
 #include <mlibc/tcb.hpp>
 
-int register_horizonos_port(long *ret) {
-	return syscall(SYSCALL_PORTREGISTER, ret);
+int register_horizonos_port(long *ret, uint64_t preferredPort) {
+	return syscall(SYSCALL_PORTREGISTER, ret, preferredPort);
 }
 
 int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr) {

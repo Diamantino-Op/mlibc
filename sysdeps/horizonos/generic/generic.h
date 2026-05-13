@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-int register_horizonos_port(long *ret);
+int register_horizonos_port(long *ret, uint64_t preferredPort = 0);
 int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr);
 int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options);
 int is_thread_alive(int tid, bool *alive);
