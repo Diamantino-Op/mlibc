@@ -46,19 +46,12 @@ int get_rsdp(uint64_t *rsdpAddr) {
 	return syscall(SYSCALL_GETRSDP, reinterpret_cast<long *>(rsdpAddr));
 }
 
-int install_irq_handler(uint32_t irq, uint32_t(*handler)(void *), void *ctx, void *handlerOut) {
-	long ret;
-	int err = syscall(SYSCALL_INSTALLIRQHANDLER, &ret, irq, reinterpret_cast<uint64_t>(handler), reinterpret_cast<uint64_t>(ctx));
-
-	if (handlerOut != nullptr) {
-		*reinterpret_cast<uint64_t *>(handlerOut) = static_cast<uint64_t>(ret);
-	}
-
-	return err;
+int install_irq_handler(uint64_t irq, uint64_t port) {
+	return syscall(SYSCALL_INSTALLIRQHANDLER, NULL, irq, port);
 }
 
-int uninstall_irq_handler(uint32_t(*handler)(void *), void *handle) {
-	return syscall(SYSCALL_UNINSTALLIRQHANDLER, NULL, reinterpret_cast<uint64_t>(handler), reinterpret_cast<uint64_t>(handle));
+int uninstall_irq_handler(uint64_t irq) {
+	return syscall(SYSCALL_UNINSTALLIRQHANDLER, NULL, irq);
 }
 
 int get_irq_mode(long *mode) {
