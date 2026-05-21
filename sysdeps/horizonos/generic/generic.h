@@ -17,6 +17,10 @@ int install_irq_handler(uint64_t irq, uint64_t port);
 int uninstall_irq_handler(uint64_t irq);
 int get_irq_mode(long *mode);
 int set_int_status(bool status);
+int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu = 0);
+int freeIntVec(uint8_t vec, uint64_t destCpu = 0);
+int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu = 0);
+int freeGsi(uint64_t gsi, uint64_t destCpu = 0);
 
 #ifdef __cplusplus
 }

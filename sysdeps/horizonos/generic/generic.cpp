@@ -21,13 +21,11 @@ int register_horizonos_port(long *ret, uint64_t preferredPort) {
 }
 
 int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr) {
-	long ret;
-	return syscall(SYSCALL_SENDMSG, &ret, sendPort, port, reinterpret_cast<uint64_t>(hdr));
+	return syscall(SYSCALL_SENDMSG, NULL, sendPort, port, reinterpret_cast<uint64_t>(hdr));
 }
 
 int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options) {
-	long ret;
-	return syscall(SYSCALL_RECVMSG, &ret, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
+	return syscall(SYSCALL_RECVMSG, NULL, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
 }
 
 int is_thread_alive(int tid, bool *alive) {
@@ -59,8 +57,23 @@ int get_irq_mode(long *mode) {
 }
 
 int set_int_status(bool status) {
-	long ret;
-	return syscall(SYSCALL_SETINTSTATUS, &ret, status);
+	return syscall(SYSCALL_SETINTSTATUS, NULL, status);
+}
+
+int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu) {
+	return syscall(SYSCALL_ALLOC_INT_VEC, reinterpret_cast<long *>(vecOut), port, destCpu);
+}
+
+int freeIntVec(uint8_t vec, uint64_t destCpu) {
+	return syscall(SYSCALL_FREE_INT_VEC, NULL, vec, destCpu);
+}
+
+int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu) {
+	return syscall(SYSCALL_ALLOC_GSI, reinterpret_cast<long *>(gsiOut), port, destCpu);
+}
+
+int freeGsi(uint64_t gsi, uint64_t destCpu) {
+	return syscall(SYSCALL_FREE_GSI, NULL, gsi, destCpu);
 }
 
 namespace mlibc {
