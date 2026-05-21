@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <bits/ensure.h>
 #include <bits/nl_item.h>
 #include <frg/scope_exit.hpp>
