@@ -13,6 +13,7 @@ libc_sources += files(
 	'generic/libgen.cpp',
 	'generic/lookup.cpp',
 	'generic/netdb.cpp',
+	'generic/nl_types.cpp',
 	'generic/net-if.cpp',
 	'generic/poll.cpp',
 	'generic/posix_ctype.cpp',
