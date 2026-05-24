@@ -76,6 +76,18 @@ int freeGsi(uint64_t gsi, uint64_t destCpu) {
 	return syscall(SYSCALL_FREE_GSI, NULL, gsi, destCpu);
 }
 
+int lockToCore(uint64_t cpuId) {
+	return syscall(SYSCALL_LOCK_TO_CORE, NULL, cpuId);
+}
+
+int getCpuCount(uint64_t *cpuCountOut) {
+	return syscall(SYSCALL_GET_CPU_COUNT, reinterpret_cast<long *>(cpuCountOut));
+}
+
+int getCpuIds(long *cpuIdOutArray, uint64_t cpuCount) {
+	return syscall(SYSCALL_GET_CPU_IDS, cpuIdOutArray, cpuCount);
+}
+
 namespace mlibc {
 	[[noreturn]] static void panic_unimplemented_sysdep(const char *name) {
 		mlibc::panicLogger() << "mlibc: unimplemented sysdep " << name << frg::endlog;

@@ -21,6 +21,9 @@ int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu = 0);
 int freeIntVec(uint8_t vec, uint64_t destCpu = 0);
 int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu = 0);
 int freeGsi(uint64_t gsi, uint64_t destCpu = 0);
+int lockToCore(uint64_t cpuId);
+int getCpuCount(uint64_t *cpuCountOut);
+int getCpuIds(long *cpuIdOutArray, uint64_t cpuCount);
 
 #ifdef __cplusplus
 }
