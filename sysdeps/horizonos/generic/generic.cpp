@@ -2,19 +2,20 @@
 #include <mlibc/debug.hpp>
 #include <mlibc/all-sysdeps.hpp>
 #include "generic.h"
-#include <errno.h>
-#include <horizonos/syscall.h>
-#include <horizonos/archctl.h>
-#include <string.h>
-#include <stdlib.h>
+
 #include <asm/ioctls.h>
+#include <dirent.h>
+#include <errno.h>
+#include <horizonos/archctl.h>
+#include <horizonos/syscall.h>
+#include <mlibc/tcb.hpp>
 #include <poll.h>
-#include <sys/select.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <mlibc/tcb.hpp>
 
 int register_horizonos_port(long *ret, uint64_t preferredPort) {
 	return syscall(SYSCALL_PORTREGISTER, ret, preferredPort);
@@ -36,8 +37,8 @@ int is_thread_alive(int tid, bool *alive) {
 	return err;
 }
 
-int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr) {
-	return syscall(SYSCALL_MMAPPHYS, reinterpret_cast<long *>(retAddr), physAddr, len);
+int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr, bool isHhdm) {
+	return syscall(SYSCALL_MMAPPHYS, reinterpret_cast<long *>(retAddr), physAddr, len, static_cast<uint64_t>(isHhdm));
 }
 
 int get_rsdp(uint64_t *rsdpAddr) {
@@ -84,8 +85,12 @@ int getCpuCount(uint64_t *cpuCountOut) {
 	return syscall(SYSCALL_GET_CPU_COUNT, reinterpret_cast<long *>(cpuCountOut));
 }
 
-int getCpuIds(long *cpuIdOutArray, uint64_t cpuCount) {
-	return syscall(SYSCALL_GET_CPU_IDS, cpuIdOutArray, cpuCount);
+int getCpuIds(uint64_t *cpuIdOutArray, uint64_t cpuCount) {
+	return syscall(SYSCALL_GET_CPU_IDS, NULL, reinterpret_cast<uint64_t>(cpuIdOutArray), cpuCount);
+}
+
+int allocPhysPage(uint64_t *outAddr) {
+	return syscall(SYSCALL_ALLOC_PHYS_PAGE, reinterpret_cast<long *>(outAddr));
 }
 
 namespace mlibc {
@@ -147,8 +152,7 @@ namespace mlibc {
 
 	int Sysdeps<TcbSet>::operator()(void *pointer) {
 		long r;
-		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, reinterpret_cast<uint64_t>(pointer)
-	    );
+		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, reinterpret_cast<uint64_t>(pointer));
 	}
 
 	// Exit
