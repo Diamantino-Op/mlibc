@@ -37,6 +37,10 @@ int is_thread_alive(int tid, bool *alive) {
 	return err;
 }
 
+int munmap_extra(void *ptr, size_t len, bool freePage) {
+	return syscall(SYSCALL_MUNMAP, nullptr, reinterpret_cast<uintptr_t>(ptr), len, freePage);
+}
+
 int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr, bool isHhdm) {
 	return syscall(SYSCALL_MMAPPHYS, reinterpret_cast<long *>(retAddr), physAddr, len, static_cast<uint64_t>(isHhdm));
 }
@@ -124,7 +128,7 @@ namespace mlibc {
 
 	int Sysdeps<VmUnmap>::operator()(void *pointer, size_t size) {
 		long ret;
-		return syscall(SYSCALL_MUNMAP, &ret, reinterpret_cast<uintptr_t>(pointer), size);
+		return syscall(SYSCALL_MUNMAP, &ret, reinterpret_cast<uintptr_t>(pointer), size, true);
 	}
 
 	// Protect

@@ -11,6 +11,7 @@ int register_horizonos_port(long *ret, uint64_t preferredPort = 0);
 int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr);
 int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options);
 int is_thread_alive(int tid, bool *alive);
+int munmap_extra(void *ptr, size_t len, bool freePage);
 int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr, bool isHhdm = true);
 int get_rsdp(uint64_t *rsdpAddr);
 int install_irq_handler(uint64_t irq, uint64_t port);
