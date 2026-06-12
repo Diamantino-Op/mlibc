@@ -89,6 +89,10 @@ int allocPhysPage(uint64_t *outAddr) {
 	return syscall(SYSCALL_ALLOC_PHYS_PAGE, reinterpret_cast<long *>(outAddr));
 }
 
+int freePhysPage(uint64_t physPage) {
+	
+}
+
 namespace mlibc {
 	[[noreturn]] static void panic_unimplemented_sysdep(const char *name) {
 		mlibc::panicLogger() << "mlibc: unimplemented sysdep " << name << frg::endlog;
