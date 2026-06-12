@@ -1,6 +1,7 @@
 #ifndef _HORIZONOS_GENERIC_H
 #define _HORIZONOS_GENERIC_H
 
+#include <abi-bits/hos_cpu.h>
 #include <abi-bits/hos_msg.h>
 
 #ifdef __cplusplus
@@ -18,13 +19,12 @@ int install_irq_handler(uint64_t irq, uint64_t port);
 int uninstall_irq_handler(uint64_t irq);
 int get_irq_mode(long *mode);
 int set_int_status(bool status);
-int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu = 0);
-int freeIntVec(uint8_t vec, uint64_t destCpu = 0);
-int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu = 0);
-int freeGsi(uint64_t gsi, uint64_t destCpu = 0);
+int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu = 0, bool isLapic = false);
+int freeIntVec(uint8_t vec, uint64_t destCpu = 0, bool isLapic = false);
+int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu = 0, bool isLapic = false);
+int freeGsi(uint64_t gsi, uint64_t destCpu = 0, bool isLapic = false);
 int lockToCore(uint64_t cpuId);
-int getCpuCount(uint64_t *cpuCountOut);
-int getCpuIds(uint64_t *cpuIdOutArray, uint64_t cpuCount);
+int getCpuIds(HosCpuInfo *cpuIdOutArray, uint64_t cpuCount);
 int allocPhysPage(uint64_t *outAddr);
 
 #ifdef __cplusplus

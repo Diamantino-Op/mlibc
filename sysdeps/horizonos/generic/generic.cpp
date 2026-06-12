@@ -22,11 +22,11 @@ int register_horizonos_port(long *ret, uint64_t preferredPort) {
 }
 
 int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_msg *hdr) {
-	return syscall(SYSCALL_SENDMSG, NULL, sendPort, port, reinterpret_cast<uint64_t>(hdr));
+	return syscall(SYSCALL_SENDMSG, nullptr, sendPort, port, reinterpret_cast<uint64_t>(hdr));
 }
 
 int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options) {
-	return syscall(SYSCALL_RECVMSG, NULL, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
+	return syscall(SYSCALL_RECVMSG, nullptr, port, reinterpret_cast<uint64_t>(hdr), reinterpret_cast<uint64_t>(options));
 }
 
 int is_thread_alive(int tid, bool *alive) {
@@ -50,11 +50,11 @@ int get_rsdp(uint64_t *rsdpAddr) {
 }
 
 int install_irq_handler(uint64_t irq, uint64_t port) {
-	return syscall(SYSCALL_INSTALLIRQHANDLER, NULL, irq, port);
+	return syscall(SYSCALL_INSTALLIRQHANDLER, nullptr, irq, port);
 }
 
 int uninstall_irq_handler(uint64_t irq) {
-	return syscall(SYSCALL_UNINSTALLIRQHANDLER, NULL, irq);
+	return syscall(SYSCALL_UNINSTALLIRQHANDLER, nullptr, irq);
 }
 
 int get_irq_mode(long *mode) {
@@ -62,35 +62,27 @@ int get_irq_mode(long *mode) {
 }
 
 int set_int_status(bool status) {
-	return syscall(SYSCALL_SETINTSTATUS, NULL, status);
+	return syscall(SYSCALL_SETINTSTATUS, nullptr, status);
 }
 
-int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu) {
-	return syscall(SYSCALL_ALLOC_INT_VEC, reinterpret_cast<long *>(vecOut), port, destCpu);
+int allocIntVec(uint8_t *vecOut, uint64_t port, uint64_t destCpu, bool isLapic) {
+	return syscall(SYSCALL_ALLOC_INT_VEC, reinterpret_cast<long *>(vecOut), port, destCpu, static_cast<uint64_t>(isLapic));
 }
 
-int freeIntVec(uint8_t vec, uint64_t destCpu) {
-	return syscall(SYSCALL_FREE_INT_VEC, NULL, vec, destCpu);
+int freeIntVec(uint8_t vec, uint64_t destCpu, bool isLapic) {
+	return syscall(SYSCALL_FREE_INT_VEC, nullptr, vec, destCpu, static_cast<uint64_t>(isLapic));
 }
 
-int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu) {
-	return syscall(SYSCALL_ALLOC_GSI, reinterpret_cast<long *>(gsiOut), port, destCpu);
+int allocGsi(uint64_t *gsiOut, uint64_t port, uint64_t destCpu, bool isLapic) {
+	return syscall(SYSCALL_ALLOC_GSI, reinterpret_cast<long *>(gsiOut), port, destCpu, static_cast<uint64_t>(isLapic));
 }
 
-int freeGsi(uint64_t gsi, uint64_t destCpu) {
-	return syscall(SYSCALL_FREE_GSI, NULL, gsi, destCpu);
+int freeGsi(uint64_t gsi, uint64_t destCpu, bool isLapic) {
+	return syscall(SYSCALL_FREE_GSI, nullptr, gsi, destCpu, static_cast<uint64_t>(isLapic));
 }
 
-int lockToCore(uint64_t cpuId) {
-	return syscall(SYSCALL_LOCK_TO_CORE, NULL, cpuId);
-}
-
-int getCpuCount(uint64_t *cpuCountOut) {
-	return syscall(SYSCALL_GET_CPU_COUNT, reinterpret_cast<long *>(cpuCountOut));
-}
-
-int getCpuIds(uint64_t *cpuIdOutArray, uint64_t cpuCount) {
-	return syscall(SYSCALL_GET_CPU_IDS, NULL, reinterpret_cast<uint64_t>(cpuIdOutArray), cpuCount);
+int getCpuIds(HosCpuInfo *cpuIdOutArray, uint64_t cpuCount) {
+	return syscall(SYSCALL_GET_CPU_IDS, nullptr, reinterpret_cast<uint64_t>(cpuIdOutArray), cpuCount);
 }
 
 int allocPhysPage(uint64_t *outAddr) {
@@ -106,8 +98,7 @@ namespace mlibc {
 	// Print
 
 	void Sysdeps<LibcLog>::operator()(const char *message) {
-		long ret;
-		syscall(SYSCALL_PRINT, &ret, reinterpret_cast<uint64_t>(message));
+		syscall(SYSCALL_PRINT, nullptr, reinterpret_cast<uint64_t>(message));
 	}
 
 	[[noreturn]] void Sysdeps<LibcPanic>::operator()() {
@@ -120,22 +111,22 @@ namespace mlibc {
 	int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
 		long ret;
 		long err = syscall(SYSCALL_MMAP, &ret, reinterpret_cast<uint64_t>(hint), size, prot, flags, fd, offset);
+
 		*window = (void *)ret;
+
 		return err;
 	}
 
 	// Unmap
 
 	int Sysdeps<VmUnmap>::operator()(void *pointer, size_t size) {
-		long ret;
-		return syscall(SYSCALL_MUNMAP, &ret, reinterpret_cast<uintptr_t>(pointer), size, true);
+		return syscall(SYSCALL_MUNMAP, nullptr, reinterpret_cast<uintptr_t>(pointer), size, true);
 	}
 
 	// Protect
 
 	int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
-		long ret;
-		return syscall(SYSCALL_MPROTECT, &ret, reinterpret_cast<uint64_t>(pointer), size, prot);
+		return syscall(SYSCALL_MPROTECT, nullptr, reinterpret_cast<uint64_t>(pointer), size, prot);
 	}
 
 	// Get TID
@@ -143,26 +134,27 @@ namespace mlibc {
 	int Sysdeps<FutexTid>::operator()() {
 		long ret;
 		syscall(SYSCALL_GETTID, &ret);
+
 		return ret;
 	}
 
 	pid_t Sysdeps<GetTid>::operator()() {
 		long ret;
 		syscall(SYSCALL_GETTID, &ret);
+
 		return ret;
 	}
 
 	// Set FSBASE
 
 	int Sysdeps<TcbSet>::operator()(void *pointer) {
-		long r;
-		return syscall(SYSCALL_ARCHCTL, &r, ARCH_CTL_SET_FSBASE, reinterpret_cast<uint64_t>(pointer));
+		return syscall(SYSCALL_ARCHCTL, nullptr, ARCH_CTL_SET_FSBASE, reinterpret_cast<uint64_t>(pointer));
 	}
 
 	// Exit
 
 	[[noreturn]] void Sysdeps<Exit>::operator()(int status) {
-		syscall(SYSCALL_EXIT, NULL, status);
+		syscall(SYSCALL_EXIT, nullptr, status);
 		__builtin_unreachable();
 	}
 
@@ -173,8 +165,7 @@ namespace mlibc {
 			return EFAULT;
 		}
 
-		long ret;
-		int err = syscall(SYSCALL_CLOCKGET, &ret, clock, reinterpret_cast<uint64_t>(secs), reinterpret_cast<uint64_t>(nanos));
+		int err = syscall(SYSCALL_CLOCKGET, nullptr, clock, reinterpret_cast<uint64_t>(secs), reinterpret_cast<uint64_t>(nanos));
 
 		if (err != 0) {
 			*secs = -1;
@@ -189,8 +180,7 @@ namespace mlibc {
 	// Sysinfo
 
 	int Sysdeps<Sysinfo>::operator()(struct sysinfo *info) {
-		long r;
-		return syscall(SYSCALL_SYSINFO, &r, reinterpret_cast<uint64_t>(info));
+		return syscall(SYSCALL_SYSINFO, nullptr, reinterpret_cast<uint64_t>(info));
 	}
 
 	// Get CPU
@@ -200,28 +190,26 @@ namespace mlibc {
 		// can never fail
 		syscall(SYSCALL_GETCPU, &ret);
 		*cpu = ret;
+
 		return 0;
 	}
 
 	// Kill Thread
 
 	int Sysdeps<Tgkill>::operator()(int pid, int tid, int sig) {
-		long ret;
-		return syscall(SYSCALL_KILLTHREAD, &ret, pid, tid, sig);
+		return syscall(SYSCALL_KILLTHREAD, nullptr, pid, tid, sig);
 	}
 
 	// Pause
 
 	int Sysdeps<Pause>::operator()() {
-		long ret;
-		return syscall(SYSCALL_PAUSE, &ret);
+		return syscall(SYSCALL_PAUSE, nullptr);
 	}
 
 	// Messages
 
 	int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
-		long ret;
-		long err = syscall(SYSCALL_NANOSLEEP, &ret, *secs, *nanos);
+		long err = syscall(SYSCALL_NANOSLEEP, nullptr, *secs, *nanos);
 
 		if (err == 0) {
 			*secs = 0;
@@ -239,8 +227,7 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Kill>::operator()(pid_t pid, int signal) {
-		long ret;
-		return syscall(SYSCALL_KILL, &ret, pid, signal);
+		return syscall(SYSCALL_KILL, nullptr, pid, signal);
 	}
 
 	// Futex
@@ -249,13 +236,11 @@ namespace mlibc {
 	#define FUTEX_WAKE 1
 
 	int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
-		long ret;
-		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAIT, expected, (uint64_t)time);
+		return syscall(SYSCALL_FUTEX, nullptr, (uint64_t)pointer, FUTEX_WAIT, expected, (uint64_t)time);
 	}
 
 	int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
-		long ret;
-		return syscall(SYSCALL_FUTEX, &ret, (uint64_t)pointer, FUTEX_WAKE, all ? INT_MAX : 1, 0);
+		return syscall(SYSCALL_FUTEX, nullptr, (uint64_t)pointer, FUTEX_WAKE, all ? INT_MAX : 1, 0);
 	}
 
 #ifndef MLIBC_BUILDING_RTLD
@@ -270,6 +255,7 @@ namespace mlibc {
 	int Sysdeps<Clone>::operator()(void *tcb, pid_t *pid_out, void *stack) {
 		long ret;
 		long err = syscall(SYSCALL_NEWTHREAD, &ret, (uintptr_t)__mlibc_thread_entry, (uintptr_t)stack);
+
 		if (!err) {
 			auto *newTcb = reinterpret_cast<Tcb *>(tcb);
 			__atomic_store_n(&newTcb->tid, static_cast<int>(ret), __ATOMIC_RELAXED);
@@ -284,12 +270,14 @@ namespace mlibc {
 
 	int Sysdeps<GetRlimit>::operator()(int resource, struct rlimit *limit) {
 		switch(resource) {
-		case RLIMIT_NOFILE:
-			limit->rlim_cur = RLIM_INFINITY;
-			limit->rlim_max = RLIM_INFINITY;
-			return 0;
-		default:
-			return EINVAL;
+			case RLIMIT_NOFILE:
+				limit->rlim_cur = RLIM_INFINITY;
+				limit->rlim_max = RLIM_INFINITY;
+
+				return 0;
+
+			default:
+				return EINVAL;
 		}
 	}
 
@@ -309,7 +297,7 @@ namespace mlibc {
 
 	int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
 		size += 4096 - (size % 4096);
-		return sysdep<VmMap>(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, 0, pointer);
+		return sysdep<VmMap>(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, 0, pointer);
 	}
 
 	int Sysdeps<AnonFree>::operator()(void *pointer, size_t size) {
@@ -320,10 +308,7 @@ namespace mlibc {
 #ifndef MLIBC_BUILDING_RTLD
 	extern "C" void __mlibc_restorer();
 
-	int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *__restrict act,
-		struct sigaction *__restrict oldact) {
-			long ret;
-
+	int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *__restrict act, struct sigaction *__restrict oldact) {
 			struct sigaction newAction;
 			if(act)
 				memcpy(&newAction, act, sizeof(struct sigaction));
@@ -333,27 +318,115 @@ namespace mlibc {
 				newAction.sa_flags |= SA_RESTORER;
 			}
 
-			return syscall(SYSCALL_SIGACTION, &ret, sig, act ? (uint64_t)&newAction : 0, (uint64_t)oldact);
+			return syscall(SYSCALL_SIGACTION, nullptr, sig, act ? (uint64_t)&newAction : 0, (uint64_t)oldact);
 	}
 #endif
 
 	// IsaTTY
 
 	int Sysdeps<Isatty>::operator()(int fd) {
-		long ret;
-		return syscall(SYSCALL_ISATTY, &ret, fd);
+		return syscall(SYSCALL_ISATTY, nullptr, fd);
 	}
 
 	// IO
 
 	int Sysdeps<Ioperm>::operator()(unsigned long int from, unsigned long int num, int state) {
-		long ret;
-		return syscall(SYSCALL_IOPERM, &ret, from, num, state);
+		return syscall(SYSCALL_IOPERM, nullptr, from, num, state);
 	}
 
 	int Sysdeps<Iopl>::operator()(int level) {
-		long ret;
-		return syscall(SYSCALL_IOPL, &ret, level);
+		return syscall(SYSCALL_IOPL, nullptr, level);
+	}
+
+	// Affinity
+	int Sysdeps<GetAffinity>::operator()(pid_t pid, size_t cpusetsize, cpu_set_t *mask) {
+		return syscall(SYSCALL_GETAFFINITY, nullptr, pid, cpusetsize, reinterpret_cast<uint64_t>(mask));
+	}
+
+	int Sysdeps<GetThreadaffinity>::operator()(pid_t tid, size_t cpusetsize, cpu_set_t *mask) {
+		return syscall(SYSCALL_GETAFFINITY, nullptr, tid, cpusetsize, reinterpret_cast<uint64_t>(mask));
+	}
+
+	int Sysdeps<SetAffinity>::operator()(pid_t pid, size_t cpusetsize, const cpu_set_t *mask) {
+		return syscall(SYSCALL_SETAFFINITY, nullptr, pid, cpusetsize, reinterpret_cast<uint64_t>(mask));
+	}
+
+	int Sysdeps<SetThreadaffinity>::operator()(pid_t tid, size_t cpusetsize, const cpu_set_t *mask) {
+		return syscall(SYSCALL_SETAFFINITY, nullptr, tid, cpusetsize, reinterpret_cast<uint64_t>(mask));
+	}
+
+	int Sysdeps<Sysconf>::operator()(int num, long *ret) {
+		switch(num) {
+			case _SC_OPEN_MAX: {
+				struct rlimit ru;
+
+				if (int e = sysdep<GetRlimit>(RLIMIT_NOFILE, &ru); e) {
+					return e;
+				}
+
+				*ret = (ru.rlim_cur == RLIM_INFINITY) ? -1 : ru.rlim_cur;
+
+				break;
+			}
+
+			case _SC_NPROCESSORS_CONF:
+			case _SC_NPROCESSORS_ONLN: {
+#ifndef MLIBC_BUILDING_RTLD
+				cpu_set_t set;
+				CPU_ZERO(&set);
+
+				if (int e = sysdep<GetAffinity>(0, sizeof(set), &set); e) {
+					return e;
+				}
+
+				*ret = CPU_COUNT(&set);
+#endif
+
+				//syscall(SYSCALL_GET_CPU_COUNT, ret);
+
+				//mlibc::infoLogger() << "mlibc: ret val: " << *ret << frg::endlog;
+
+				break;
+			}
+
+			case _SC_PHYS_PAGES: {
+				struct sysinfo info;
+
+				if (int e = sysdep<Sysinfo>(&info); e) {
+					return
+					 e;
+				}
+
+				unsigned unit = (info.mem_unit) ? info.mem_unit : 1;
+				*ret = std::min(long((info.totalram * unit) / 0x1000), LONG_MAX); // 0x1000 = PAGE_SIZE
+
+				break;
+			}
+
+			case _SC_CHILD_MAX: {
+				struct rlimit ru;
+
+				if (int e = sysdep<GetRlimit>(RLIMIT_NPROC, &ru); e) {
+					return e;
+				}
+
+				*ret = (ru.rlim_cur == RLIM_INFINITY) ? -1 : ru.rlim_cur;
+
+				break;
+			}
+
+			case _SC_LINE_MAX: {
+				*ret = -1;
+
+				break;
+			}
+
+			default: {
+				return EINVAL;
+			}
+		}
+
+		return 0;
 	}
 
 	// Stubs

@@ -137,7 +137,12 @@ struct HorizonOSSysdepTags :
 	ClockGet,
 	PrepareStack,
 	Iopl,
-	Ioperm
+	Ioperm,
+	GetAffinity,
+	GetThreadaffinity,
+	SetAffinity,
+	SetThreadaffinity,
+	Sysconf
 {};
 
 template<typename Tag>
