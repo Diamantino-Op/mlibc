@@ -90,7 +90,7 @@ int allocPhysPage(uint64_t *outAddr) {
 }
 
 int freePhysPage(uint64_t physPage) {
-	
+	return syscall(SYSCALL_FREE_PHYS_PAGE, nullptr, physPage);
 }
 
 namespace mlibc {

@@ -26,6 +26,7 @@ int freeGsi(uint64_t gsi, uint64_t destCpu = 0, bool isLapic = false);
 int lockToCore(uint64_t cpuId);
 int getCpuIds(HosCpuInfo *cpuIdOutArray, uint64_t cpuCount);
 int allocPhysPage(uint64_t *outAddr);
+int freePhysPage(uint64_t physPage);
 
 #ifdef __cplusplus
 }
