@@ -20,7 +20,7 @@ int send_horizonos_message(uint64_t sendPort, uint64_t port, const struct hos_ms
 int receive_horizonos_message(uint64_t port, struct hos_msg *hdr, filter_options *options);
 int is_thread_alive(int tid, bool *alive);
 int munmap_extra(void *ptr, size_t len, bool freePage);
-int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr, bool isHhdm = true, MMapCacheMode cacheMode = MAP_CACHE_WB);
+int mmap_phys(uint64_t physAddr, uint64_t len, uint64_t *retAddr, bool isHhdm = false, MMapCacheMode cacheMode = MAP_CACHE_WB);
 int get_rsdp(uint64_t *rsdpAddr);
 int install_irq_handler(uint64_t irq, uint64_t port);
 int uninstall_irq_handler(uint64_t irq);
