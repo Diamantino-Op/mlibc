@@ -433,34 +433,15 @@ namespace mlibc {
 		return 0;
 	}
 
-	// Stubs
-	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
-		(void)size;
-		(void)list;
+	// OS
+
+	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
+		(void)sockfd;
+		(void)how;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
-	int Sysdeps<GetGroups>::operator()(size_t size, gid_t *list, int *ret) {
-		(void)size;
-		(void)list;
-		(void)ret;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number, void *__restrict buffer, socklen_t *__restrict size) {
-		(void)fd;
-		(void)layer;
-		(void)number;
-		(void)buffer;
-		(void)size;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<InetConfigured>::operator()(bool *ipv4, bool *ipv6) {
-		(void)ipv4;
-		(void)ipv6;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
+	// FileSystem
 
 	int Sysdeps<Readv>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
 		(void)fd;
@@ -475,106 +456,6 @@ namespace mlibc {
 		(void)iovs;
 		(void)iovc;
 		(void)bytes_written;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Flock>::operator()(int fd, int options) {
-		(void)fd;
-		(void)options;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Nice>::operator()(int nice, int *ret) {
-		(void)nice;
-		(void)ret;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
-		(void)sockfd;
-		(void)how;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sigpending>::operator()(sigset_t *set) {
-		(void)set;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sigtimedwait>::operator()(const sigset_t *__restrict set, siginfo_t *__restrict info, const struct timespec *__restrict timeout, int *out_signal) {
-		(void)set;
-		(void)info;
-		(void)timeout;
-		(void)out_signal;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
-		(void)set;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetUid>::operator()(uid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetGid>::operator()(gid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetEuid>::operator()(uid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetEgid>::operator()(gid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	uid_t Sysdeps<GetUid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	uid_t Sysdeps<GetEuid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	gid_t Sysdeps<GetGid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	gid_t Sysdeps<GetEgid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
-		(void)_ruid;
-		(void)_euid;
-		(void)_suid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
-		(void)_rgid;
-		(void)_egid;
-		(void)_sgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
-		(void)ruid;
-		(void)euid;
-		(void)suid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
-		(void)rgid;
-		(void)egid;
-		(void)sgid;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
@@ -611,170 +492,12 @@ namespace mlibc {
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
-	int Sysdeps<Chroot>::operator()(const char *path) {
-		(void)path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Peername>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
-		(void)fd;
-		(void)addr_ptr;
-		(void)max_addr_length;
-		(void)actual_length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sockname>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
-		(void)fd;
-		(void)addr_ptr;
-		(void)max_addr_length;
-		(void)actual_length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Socketpair>::operator()(int domain, int type_and_flags, int proto, int *fds) {
-		(void)domain;
-		(void)type_and_flags;
-		(void)proto;
-		(void)fds;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
-		(void)which;
-		(void)curr_value;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
-		(void)which;
-		(void)new_value;
-		(void)old_value;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
 	int Sysdeps<Fsync>::operator()(int fd) {
 		(void)fd;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
 	int Sysdeps<Fdatasync>::operator()(int fd) {
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	pid_t Sysdeps<GetPpid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
-		(void)pid;
-		(void)pgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
-		(void)pid;
-		(void)pgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
-		(void)buffer;
-		(void)bufsize;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
-		(void)buffer;
-		(void)bufsize;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Uname>::operator()(struct utsname *buf) {
-		(void)buf;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	void Sysdeps<Sync>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
-		(void)ss;
-		(void)oss;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid) {
-		(void)pid;
-		(void)pgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetSid>::operator()(pid_t *out) {
-		(void)out;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Listen>::operator()(int fd, int backlog) {
-		(void)fd;
-		(void)backlog;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
-		(void)fd;
-		(void)newfd;
-		(void)addr_ptr;
-		(void)addr_length;
-		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-		(void)fd;
-		(void)addr_ptr;
-		(void)addr_length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
-		(void)fd;
-		(void)hdr;
-		(void)flags;
-		(void)length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
-		(void)fd;
-		(void)layer;
-		(void)number;
-		(void)buffer;
-		(void)size;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
-		(void)fd;
-		(void)hdr;
-		(void)flags;
-		(void)length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-		(void)fd;
-		(void)addr_ptr;
-		(void)addr_length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
-		(void)family;
-		(void)type;
-		(void)protocol;
 		(void)fd;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
@@ -941,23 +664,14 @@ namespace mlibc {
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
-	int Sysdeps<Pipe>::operator()(int *fds, int flags) {
-		(void)fds;
-		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Chdir>::operator()(const char *path) {
-		(void)path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Fchdir>::operator()(int fd) {
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
 	int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
+		(void)fd;
+		(void)flags;
+		(void)newfd;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 		(void)fd;
 		(void)flags;
 		(void)newfd;
@@ -980,13 +694,6 @@ namespace mlibc {
 		(void)buffer;
 		(void)max_size;
 		(void)bytes_read;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
-		(void)how;
-		(void)set;
-		(void)retrieve;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
@@ -1039,46 +746,6 @@ namespace mlibc {
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
 
-	int Sysdeps<Fork>::operator()(pid_t *pid) {
-		(void)pid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
-		(void)pid;
-		(void)status;
-		(void)flags;
-		(void)ru;
-		(void)ret_pid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
-		(void)fd;
-		(void)flags;
-		(void)newfd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
-	}
-
-#ifndef MLIBC_BUILDING_RTLD
-	int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
-		int fd;
-		int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
-		if(error)
-			mlibc::panicLogger() << "/dev/urandom open error " << strerror(error) << frg::endlog;
-
-		ssize_t bytes;
-		error = sysdep<Read>(fd, buffer, length, &bytes);
-		if(error) {
-			mlibc::infoLogger() << "/dev/urandom read error " << strerror(error) << frg::endlog;
-			return error;
-		}
-
-		sysdep<Close>(fd);
-		return 0;
-	}
-#endif
-
 	int Sysdeps<Mount>::operator()(const char *source, const char *target, const char *fstype, unsigned long flags, const void *data) {
 		(void)source;
 		(void)target;
@@ -1115,8 +782,6 @@ namespace mlibc {
 			*bytes_read = 0;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
-
-	// TODO
 
 	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
 		if(bytes_written)
@@ -1163,6 +828,343 @@ namespace mlibc {
 			return 0;
 		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
 	}
+
+	// Stubs
+	int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
+		(void)size;
+		(void)list;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetGroups>::operator()(size_t size, gid_t *list, int *ret) {
+		(void)size;
+		(void)list;
+		(void)ret;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number, void *__restrict buffer, socklen_t *__restrict size) {
+		(void)fd;
+		(void)layer;
+		(void)number;
+		(void)buffer;
+		(void)size;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<InetConfigured>::operator()(bool *ipv4, bool *ipv6) {
+		(void)ipv4;
+		(void)ipv6;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Flock>::operator()(int fd, int options) {
+		(void)fd;
+		(void)options;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Nice>::operator()(int nice, int *ret) {
+		(void)nice;
+		(void)ret;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sigpending>::operator()(sigset_t *set) {
+		(void)set;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sigtimedwait>::operator()(const sigset_t *__restrict set, siginfo_t *__restrict info, const struct timespec *__restrict timeout, int *out_signal) {
+		(void)set;
+		(void)info;
+		(void)timeout;
+		(void)out_signal;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
+		(void)set;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetUid>::operator()(uid_t id) {
+		(void)id;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetGid>::operator()(gid_t id) {
+		(void)id;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetEuid>::operator()(uid_t id) {
+		(void)id;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetEgid>::operator()(gid_t id) {
+		(void)id;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	uid_t Sysdeps<GetUid>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	uid_t Sysdeps<GetEuid>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	gid_t Sysdeps<GetGid>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	gid_t Sysdeps<GetEgid>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
+		(void)_ruid;
+		(void)_euid;
+		(void)_suid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
+		(void)_rgid;
+		(void)_egid;
+		(void)_sgid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
+		(void)ruid;
+		(void)euid;
+		(void)suid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
+		(void)rgid;
+		(void)egid;
+		(void)sgid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Chroot>::operator()(const char *path) {
+		(void)path;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Peername>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)max_addr_length;
+		(void)actual_length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sockname>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length, socklen_t *actual_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)max_addr_length;
+		(void)actual_length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Socketpair>::operator()(int domain, int type_and_flags, int proto, int *fds) {
+		(void)domain;
+		(void)type_and_flags;
+		(void)proto;
+		(void)fds;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
+		(void)which;
+		(void)curr_value;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+		(void)which;
+		(void)new_value;
+		(void)old_value;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	pid_t Sysdeps<GetPpid>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
+		(void)pid;
+		(void)pgid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
+		(void)pid;
+		(void)pgid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
+		(void)buffer;
+		(void)bufsize;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
+		(void)buffer;
+		(void)bufsize;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Uname>::operator()(struct utsname *buf) {
+		(void)buf;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	void Sysdeps<Sync>::operator()() {
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
+		(void)ss;
+		(void)oss;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetPgid>::operator()(pid_t pid, pid_t pgid) {
+		(void)pid;
+		(void)pgid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetSid>::operator()(pid_t *out) {
+		(void)out;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Listen>::operator()(int fd, int backlog) {
+		(void)fd;
+		(void)backlog;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, socklen_t *addr_length, int flags) {
+		(void)fd;
+		(void)newfd;
+		(void)addr_ptr;
+		(void)addr_length;
+		(void)flags;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)addr_length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *hdr, int flags, ssize_t *length) {
+		(void)fd;
+		(void)hdr;
+		(void)flags;
+		(void)length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
+		(void)fd;
+		(void)layer;
+		(void)number;
+		(void)buffer;
+		(void)size;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *hdr, int flags, ssize_t *length) {
+		(void)fd;
+		(void)hdr;
+		(void)flags;
+		(void)length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+		(void)fd;
+		(void)addr_ptr;
+		(void)addr_length;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
+		(void)family;
+		(void)type;
+		(void)protocol;
+		(void)fd;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Pipe>::operator()(int *fds, int flags) {
+		(void)fds;
+		(void)flags;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Chdir>::operator()(const char *path) {
+		(void)path;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Fchdir>::operator()(int fd) {
+		(void)fd;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
+		(void)how;
+		(void)set;
+		(void)retrieve;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Fork>::operator()(pid_t *pid) {
+		(void)pid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+	int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
+		(void)pid;
+		(void)status;
+		(void)flags;
+		(void)ru;
+		(void)ret_pid;
+		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+	}
+
+#ifndef MLIBC_BUILDING_RTLD
+	int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
+		int fd;
+		int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
+		if(error)
+			mlibc::panicLogger() << "/dev/urandom open error " << strerror(error) << frg::endlog;
+
+		ssize_t bytes;
+		error = sysdep<Read>(fd, buffer, length, &bytes);
+		if(error) {
+			mlibc::infoLogger() << "/dev/urandom read error " << strerror(error) << frg::endlog;
+			return error;
+		}
+
+		sysdep<Close>(fd);
+		return 0;
+	}
+#endif
 
 	int Sysdeps<Ttyname>::operator()(int fd, char *buffer, size_t size) {
 		(void)fd;
