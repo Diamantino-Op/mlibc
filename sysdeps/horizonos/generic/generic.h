@@ -34,6 +34,9 @@ int lockToCore(uint64_t cpuId);
 int getCpuIds(HosCpuInfo *cpuIdOutArray, uint64_t cpuCount);
 int allocPhysPage(uint64_t *outAddr);
 int freePhysPage(uint64_t physPage);
+int registerVfsService(uint64_t port);
+int registerKernelEventHandler(uint64_t port, uint64_t eventMask);
+int sendVfsRequest(uint64_t requestType, const void *request, size_t requestLength, void *reply, size_t replyLength);
 
 #ifdef __cplusplus
 }

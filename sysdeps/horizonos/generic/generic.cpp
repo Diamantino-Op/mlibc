@@ -15,7 +15,10 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
+
+#include <algorithm>
 
 int register_horizonos_port(long *ret, uint64_t preferredPort) {
 	return syscall(SYSCALL_PORTREGISTER, ret, preferredPort);
@@ -91,6 +94,318 @@ int allocPhysPage(uint64_t *outAddr) {
 
 int freePhysPage(uint64_t physPage) {
 	return syscall(SYSCALL_FREE_PHYS_PAGE, nullptr, physPage);
+}
+
+int registerVfsService(uint64_t port) {
+	return syscall(SYSCALL_REGISTER_VFS, nullptr, port);
+}
+
+int registerKernelEventHandler(uint64_t port, uint64_t eventMask) {
+	return syscall(SYSCALL_REGISTER_EVENT_HANDLER, nullptr, port, eventMask);
+}
+
+int sendVfsRequest(uint64_t requestType, const void *request, size_t requestLength, void *reply, size_t replyLength) {
+	return syscall(SYSCALL_VFS_REQUEST, nullptr, requestType, reinterpret_cast<uint64_t>(request), requestLength, reinterpret_cast<uint64_t>(reply), replyLength);
+}
+
+namespace {
+	constexpr uint64_t VFS_STAT_MSG_TYPE = 0x90000;
+	constexpr uint64_t VFS_OPEN_MSG_TYPE = 0x9000A;
+	constexpr uint64_t VFS_CLOSE_MSG_TYPE = 0x9000C;
+	constexpr uint64_t VFS_HANDLE_READ_MSG_TYPE = 0x9000E;
+	constexpr uint64_t VFS_HANDLE_WRITE_MSG_TYPE = 0x90010;
+	constexpr uint64_t VFS_UNLINK_MSG_TYPE = 0x90012;
+	constexpr uint64_t VFS_RENAME_MSG_TYPE = 0x90014;
+	constexpr uint64_t VFS_HANDLE_SEEK_MSG_TYPE = 0x90018;
+	constexpr uint64_t VFS_MKDIR_MSG_TYPE = 0x9001A;
+	constexpr uint64_t VFS_LOCK_MSG_TYPE = 0x90020;
+	constexpr uint64_t VFS_UNLOCK_MSG_TYPE = 0x90022;
+	constexpr uint64_t VFS_SYNC_MSG_TYPE = 0x90024;
+	constexpr uint64_t VFS_FSYNC_MSG_TYPE = 0x90026;
+	constexpr uint64_t VFS_LINK_MSG_TYPE = 0x9002A;
+	constexpr uint64_t VFS_SYMLINK_MSG_TYPE = 0x9002C;
+	constexpr uint64_t VFS_IOCTL_MSG_TYPE = 0x90032;
+	constexpr uint64_t VFS_HANDLE_READDIR_MSG_TYPE = 0x90034;
+	constexpr uint64_t VFS_READLINK_MSG_TYPE = 0x90036;
+	constexpr uint64_t VFS_HANDLE_TRUNCATE_MSG_TYPE = 0x90038;
+
+	constexpr uint32_t VFS_MAX_PATH_LENGTH = 256;
+	constexpr uint32_t VFS_MAX_READ_SIZE = 2048;
+	constexpr uint32_t VFS_MAX_NAME_LENGTH = 64;
+	constexpr uint32_t VFS_MAX_DIR_ENTRIES = 32;
+
+	constexpr uint8_t VFS_NODE_FILE = 1;
+	constexpr uint8_t VFS_NODE_DIRECTORY = 2;
+	constexpr uint8_t VFS_NODE_SYMLINK = 3;
+	constexpr uint8_t VFS_NODE_DEVICE = 4;
+
+	constexpr uint32_t VFS_OPEN_READ = 1 << 0;
+	constexpr uint32_t VFS_OPEN_WRITE = 1 << 1;
+	constexpr uint32_t VFS_OPEN_CREATE = 1 << 2;
+	constexpr uint32_t VFS_OPEN_APPEND = 1 << 3;
+	constexpr uint32_t VFS_OPEN_TRUNCATE = 1 << 4;
+	constexpr uint32_t VFS_OPEN_EXCLUSIVE = 1 << 5;
+	constexpr uint8_t VFS_LOCK_SHARED = 1;
+	constexpr uint8_t VFS_LOCK_EXCLUSIVE = 2;
+
+	struct VfsDirEntry {
+		char name[VFS_MAX_NAME_LENGTH] {};
+		size_t nameLength {};
+		uint8_t nodeType {};
+		uint64_t size {};
+		uint64_t nodeId {};
+	};
+
+	struct VfsStatMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+	struct VfsStatReplyMsgData { bool success {}; uint8_t nodeType {}; uint64_t size {}; uint64_t nodeId {}; uint32_t status {}; };
+	struct VfsReadDirReplyMsgData { bool success {}; uint32_t entryCount {}; VfsDirEntry entries[VFS_MAX_DIR_ENTRIES] {}; uint32_t nextOffset {}; bool hasMore {}; uint32_t status {}; };
+	struct VfsOpenMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; uint32_t flags {}; };
+	struct VfsOpenReplyMsgData { bool success {}; uint64_t handle {}; uint8_t nodeType {}; uint64_t size {}; uint32_t status {}; uint64_t nodeId {}; };
+	struct VfsCloseMsgData { uint64_t handle {}; };
+	struct VfsCloseReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsHandleReadMsgData { uint64_t handle {}; uint32_t length {}; };
+	struct VfsHandleReadReplyMsgData { bool success {}; uint32_t bytesRead {}; uint64_t position {}; uint8_t data[VFS_MAX_READ_SIZE] {}; uint32_t status {}; };
+	struct VfsHandleWriteMsgData { uint64_t handle {}; uint32_t length {}; uint8_t data[VFS_MAX_READ_SIZE] {}; };
+	struct VfsHandleWriteReplyMsgData { bool success {}; uint32_t bytesWritten {}; uint64_t position {}; uint64_t size {}; uint32_t status {}; };
+	struct VfsHandleSeekMsgData { uint64_t handle {}; int64_t offset {}; uint8_t whence {}; };
+	struct VfsHandleSeekReplyMsgData { bool success {}; uint64_t position {}; uint32_t status {}; };
+	struct VfsHandleReadDirMsgData { uint64_t handle {}; };
+	struct VfsHandleReadDirReplyMsgData { bool success {}; uint32_t entryCount {}; VfsDirEntry entries[VFS_MAX_DIR_ENTRIES] {}; uint64_t position {}; bool hasMore {}; uint32_t status {}; };
+	struct VfsUnlinkMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+	struct VfsUnlinkReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsRenameMsgData { char oldPath[VFS_MAX_PATH_LENGTH] {}; size_t oldPathLength {}; char newPath[VFS_MAX_PATH_LENGTH] {}; size_t newPathLength {}; };
+	struct VfsRenameReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsTruncateMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; uint64_t size {}; };
+	struct VfsTruncateReplyMsgData { bool success {}; uint64_t size {}; uint32_t status {}; };
+	struct VfsMkdirMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+	struct VfsMkdirReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
+	struct VfsLockMsgData { uint64_t handle {}; uint64_t offset {}; uint64_t length {}; uint8_t mode {}; };
+	struct VfsLockReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsUnlockMsgData { uint64_t handle {}; uint64_t offset {}; uint64_t length {}; };
+	struct VfsUnlockReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsSyncMsgData { char volume[VFS_MAX_NAME_LENGTH] {}; size_t volumeLength {}; };
+	struct VfsSyncReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsFsyncMsgData { uint64_t handle {}; };
+	struct VfsFsyncReplyMsgData { bool success {}; uint32_t status {}; };
+	struct VfsLinkMsgData { char oldPath[VFS_MAX_PATH_LENGTH] {}; size_t oldPathLength {}; char newPath[VFS_MAX_PATH_LENGTH] {}; size_t newPathLength {}; };
+	struct VfsLinkReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
+	struct VfsSymlinkMsgData { char target[VFS_MAX_PATH_LENGTH] {}; size_t targetLength {}; char linkPath[VFS_MAX_PATH_LENGTH] {}; size_t linkPathLength {}; };
+	struct VfsSymlinkReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
+	struct VfsReadLinkMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+	struct VfsReadLinkReplyMsgData { bool success {}; uint32_t status {}; char target[VFS_MAX_PATH_LENGTH] {}; size_t targetLength {}; };
+	struct VfsIoctlMsgData { uint64_t handle {}; uint32_t request {}; uint32_t inputLength {}; uint8_t input[VFS_MAX_READ_SIZE] {}; };
+	struct VfsIoctlReplyMsgData { bool success {}; uint32_t status {}; uint32_t outputLength {}; uint8_t output[VFS_MAX_READ_SIZE] {}; };
+	struct VfsHandleTruncateMsgData { uint64_t handle {}; uint64_t size {}; };
+	struct VfsHandleTruncateReplyMsgData { bool success {}; uint64_t size {}; uint32_t status {}; };
+
+	struct HorizonFd {
+		bool used {};
+		uint64_t handle {};
+		uint8_t nodeType {};
+		int flags {};
+		char path[VFS_MAX_PATH_LENGTH] {};
+	};
+
+	constexpr int maxHorizonFds = 256;
+	HorizonFd fdTable[maxHorizonFds] {};
+	char currentDirectory[VFS_MAX_PATH_LENGTH] = "HorizonOS:/";
+	mode_t currentUmask = 022;
+
+	size_t boundedStringLength(const char *str, size_t maxLength) {
+		size_t length = 0;
+
+		while (length < maxLength and str[length] != '\0') {
+			++length;
+		}
+
+		return length;
+	}
+
+	bool stringStartsWith(const char *str, const char *prefix) {
+		for (size_t i = 0; prefix[i] != '\0'; ++i) {
+			if (str[i] != prefix[i]) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool stringEquals(const char *a, const char *b) {
+		size_t i = 0;
+
+		for (;; ++i) {
+			if (a[i] != b[i]) {
+				return false;
+			}
+
+			if (a[i] == '\0') {
+				return true;
+			}
+		}
+	}
+
+	bool stringContainsColon(const char *str) {
+		for (size_t i = 0; str[i] != '\0'; ++i) {
+			if (str[i] == ':') {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool copyString(char *out, size_t outSize, const char *a, const char *b = nullptr, const char *c = nullptr) {
+		size_t written = 0;
+
+		const auto append = [&](const char *str) -> bool {
+			for (size_t i = 0; str != nullptr and str[i] != '\0'; ++i) {
+				if (written + 1 >= outSize) {
+					return false;
+				}
+
+				out[written++] = str[i];
+			}
+
+			return true;
+		};
+
+		if (!append(a) or !append(b) or !append(c)) {
+			return false;
+		}
+
+		out[written] = '\0';
+
+		return true;
+	}
+
+	void fillVfsName(char *dst, const size_t dstSize, size_t &length, const char *name) {
+		const size_t copyLen = boundedStringLength(name, dstSize - 1);
+
+		memcpy(dst, name, copyLen);
+		dst[copyLen] = '\0';
+		length = copyLen + 1;
+	}
+
+	bool resolvePath(const char *path, char *out, size_t outSize) {
+		if (path == nullptr or out == nullptr or outSize == 0) {
+			return false;
+		}
+
+		if (stringContainsColon(path)) {
+			return copyString(out, outSize, path);
+		} else if (stringStartsWith(path, "/Devices") and (path[8] == '\0' or path[8] == '/')) {
+			return copyString(out, outSize, "Devices:", path + 8);
+		} else if (stringEquals(path, "/")) {
+			return copyString(out, outSize, "HorizonOS:/");
+		} else if (path[0] == '/') {
+			return copyString(out, outSize, "HorizonOS:", path);
+		} else {
+			const size_t cwdLength = boundedStringLength(currentDirectory, VFS_MAX_PATH_LENGTH);
+
+			if (cwdLength == 0) {
+				return copyString(out, outSize, "HorizonOS:/", path);
+			}
+
+			if (currentDirectory[cwdLength - 1] == '/') {
+				return copyString(out, outSize, currentDirectory, path);
+			}
+
+			return copyString(out, outSize, currentDirectory, "/", path);
+		}
+	}
+
+	int allocFd(uint64_t handle, uint8_t nodeType, int flags, const char *path) {
+		for (int fd = 3; fd < maxHorizonFds; ++fd) {
+			if (!fdTable[fd].used) {
+				fdTable[fd].used = true;
+				fdTable[fd].handle = handle;
+				fdTable[fd].nodeType = nodeType;
+				fdTable[fd].flags = flags;
+				copyString(fdTable[fd].path, sizeof(fdTable[fd].path), path);
+
+				return fd;
+			}
+		}
+
+		return -1;
+	}
+
+	bool fdValid(int fd) {
+		return fd >= 0 and fd < maxHorizonFds and fdTable[fd].used;
+	}
+
+	bool backendHandleHasOtherFd(int fd) {
+		const uint64_t handle = fdTable[fd].handle;
+
+		for (int i = 3; i < maxHorizonFds; ++i) {
+			if (i != fd and fdTable[i].used and fdTable[i].handle == handle) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool localFdIsSet(int fd, fd_set *set) {
+		return fd >= 0 and fd < FD_SETSIZE and (set->fds_bits[fd / 8] & (1 << (fd % 8))) != 0;
+	}
+
+	void localFdClear(int fd, fd_set *set) {
+		if (fd >= 0 and fd < FD_SETSIZE) {
+			set->fds_bits[fd / 8] &= ~(1 << (fd % 8));
+		}
+	}
+
+	int vfsStatusToErr(uint32_t status) {
+		return status == 0 ? EIO : static_cast<int>(status);
+	}
+
+	uint32_t posixOpenFlagsToVfs(int flags) {
+		uint32_t out = 0;
+
+		if ((flags & O_ACCMODE) == O_WRONLY) {
+			out |= VFS_OPEN_WRITE;
+		} else if ((flags & O_ACCMODE) == O_RDWR) {
+			out |= VFS_OPEN_READ | VFS_OPEN_WRITE;
+		} else {
+			out |= VFS_OPEN_READ;
+		}
+
+		if ((flags & O_CREAT) != 0) out |= VFS_OPEN_CREATE;
+		if ((flags & O_APPEND) != 0) out |= VFS_OPEN_APPEND;
+		if ((flags & O_TRUNC) != 0) out |= VFS_OPEN_TRUNCATE;
+		if ((flags & O_EXCL) != 0) out |= VFS_OPEN_EXCLUSIVE;
+
+		return out;
+	}
+
+	mode_t nodeTypeToMode(uint8_t nodeType) {
+		switch (nodeType) {
+			case VFS_NODE_DIRECTORY:
+				return S_IFDIR | 0755;
+			case VFS_NODE_SYMLINK:
+				return S_IFLNK | 0777;
+			case VFS_NODE_DEVICE:
+				return S_IFCHR | 0666;
+			case VFS_NODE_FILE:
+			default:
+				return S_IFREG | 0644;
+		}
+	}
+
+	unsigned char nodeTypeToDirentType(uint8_t nodeType) {
+		switch (nodeType) {
+			case VFS_NODE_DIRECTORY:
+				return DT_DIR;
+			case VFS_NODE_SYMLINK:
+				return DT_LNK;
+			case VFS_NODE_FILE:
+				return DT_REG;
+			default:
+				return DT_UNKNOWN;
+		}
+	}
 }
 
 namespace mlibc {
@@ -438,25 +753,75 @@ namespace mlibc {
 	int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
 		(void)sockfd;
 		(void)how;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return ENOTSOCK;
 	}
 
 	// FileSystem
 
 	int Sysdeps<Readv>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_read) {
-		(void)fd;
-		(void)iovs;
-		(void)iovc;
-		(void)bytes_read;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (iovs == nullptr or iovc < 0) {
+			return EINVAL;
+		}
+
+		ssize_t total = 0;
+
+		for (int i = 0; i < iovc; ++i) {
+			ssize_t chunk = 0;
+			const int err = sysdep<Read>(fd, iovs[i].iov_base, iovs[i].iov_len, &chunk);
+
+			if (err != 0) {
+				if (total != 0) {
+					break;
+				}
+
+				return err;
+			}
+
+			total += chunk;
+
+			if (static_cast<size_t>(chunk) != iovs[i].iov_len) {
+				break;
+			}
+		}
+
+		if (bytes_read != nullptr) {
+			*bytes_read = total;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssize_t *bytes_written) {
-		(void)fd;
-		(void)iovs;
-		(void)iovc;
-		(void)bytes_written;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (iovs == nullptr or iovc < 0) {
+			return EINVAL;
+		}
+
+		ssize_t total = 0;
+
+		for (int i = 0; i < iovc; ++i) {
+			ssize_t chunk = 0;
+			const int err = sysdep<Write>(fd, iovs[i].iov_base, iovs[i].iov_len, &chunk);
+
+			if (err != 0) {
+				if (total != 0) {
+					break;
+				}
+
+				return err;
+			}
+
+			total += chunk;
+
+			if (static_cast<size_t>(chunk) != iovs[i].iov_len) {
+				break;
+			}
+		}
+
+		if (bytes_written != nullptr) {
+			*bytes_written = total;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Mknodat>::operator()(int dirfd, const char *path, int mode, int dev) {
@@ -464,42 +829,74 @@ namespace mlibc {
 		(void)path;
 		(void)mode;
 		(void)dev;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return ENOSYS;
 	}
 
 	int Sysdeps<Mkfifoat>::operator()(int dirfd, const char *path, mode_t mode) {
 		(void)dirfd;
 		(void)path;
 		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return ENOSYS;
 	}
 
 	int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
-		(void)fd;
-		(void)buf;
-		(void)n;
-		(void)off;
-		(void)bytes_read;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		off_t oldOffset = 0;
+		off_t ignored = 0;
+		int err = sysdep<Seek>(fd, 0, SEEK_CUR, &oldOffset);
+
+		if (err != 0) {
+			return err;
+		}
+
+		if ((err = sysdep<Seek>(fd, off, SEEK_SET, &ignored)) != 0) {
+			return err;
+		}
+
+		err = sysdep<Read>(fd, buf, n, bytes_read);
+		sysdep<Seek>(fd, oldOffset, SEEK_SET, &ignored);
+
+		return err;
 	}
 
 	int Sysdeps<Pwrite>::operator()(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_written) {
-		(void)fd;
-		(void)buf;
-		(void)n;
-		(void)off;
-		(void)bytes_written;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		off_t oldOffset = 0;
+		off_t ignored = 0;
+		int err = sysdep<Seek>(fd, 0, SEEK_CUR, &oldOffset);
+
+		if (err != 0) {
+			return err;
+		}
+
+		if ((err = sysdep<Seek>(fd, off, SEEK_SET, &ignored)) != 0) {
+			return err;
+		}
+
+		err = sysdep<Write>(fd, buf, n, bytes_written);
+		sysdep<Seek>(fd, oldOffset, SEEK_SET, &ignored);
+
+		return err;
 	}
 
 	int Sysdeps<Fsync>::operator()(int fd) {
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		VfsFsyncMsgData req {};
+		VfsFsyncReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+
+		const int err = sendVfsRequest(VFS_FSYNC_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Fdatasync>::operator()(int fd) {
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Fsync>(fd);
 	}
 
 	int Sysdeps<Utimensat>::operator()(int dirfd, const char *pathname, const struct timespec times[2], int flags) {
@@ -507,7 +904,7 @@ namespace mlibc {
 		(void)pathname;
 		(void)times;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<Fchownat>::operator()(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
@@ -516,13 +913,26 @@ namespace mlibc {
 		(void)owner;
 		(void)group;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
-		(void)fd;
-		(void)size;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		VfsHandleTruncateMsgData req {};
+		VfsHandleTruncateReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+		req.size = size;
+
+		const int err = sendVfsRequest(VFS_HANDLE_TRUNCATE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
@@ -539,43 +949,97 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
-		(void)fds;
-		(void)count;
 		(void)timeout;
-		(void)num_events;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+
+		if (fds == nullptr or num_events == nullptr) {
+			return EFAULT;
+		}
+
+		int ready = 0;
+
+		for (nfds_t i = 0; i < count; ++i) {
+			fds[i].revents = 0;
+
+			if (fds[i].fd < 0) {
+				continue;
+			}
+
+			if (fds[i].fd <= 2 or fdValid(fds[i].fd)) {
+				fds[i].revents = fds[i].events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM);
+
+				if (fds[i].revents == 0 and fds[i].events != 0) {
+					fds[i].revents = POLLIN;
+				}
+			} else {
+				fds[i].revents = POLLNVAL;
+			}
+
+			if (fds[i].revents != 0) {
+				++ready;
+			}
+		}
+
+		*num_events = ready;
+
+		return 0;
 	}
 
 	int Sysdeps<Ppoll>::operator()(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
-		(void)fds;
-		(void)nfds;
 		(void)timeout;
 		(void)sigmask;
-		(void)num_events;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Poll>(fds, nfds, 0, num_events);
 	}
 
 	int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set, fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
-		(void)num_fds;
-		(void)read_set;
-		(void)write_set;
-		(void)except_set;
 		(void)timeout;
 		(void)sigmask;
-		(void)num_events;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+
+		if (num_events == nullptr) {
+			return EFAULT;
+		}
+
+		int ready = 0;
+
+		for (int fd = 0; fd < num_fds; ++fd) {
+			const bool valid = fd <= 2 or fdValid(fd);
+
+			if (read_set != nullptr and localFdIsSet(fd, read_set)) {
+				if (valid) {
+					++ready;
+				} else {
+					localFdClear(fd, read_set);
+				}
+			}
+
+			if (write_set != nullptr and localFdIsSet(fd, write_set)) {
+				if (valid) {
+					++ready;
+				} else {
+					localFdClear(fd, write_set);
+				}
+			}
+		}
+
+		(void)except_set;
+		*num_events = ready;
+
+		return 0;
 	}
 
 	int Sysdeps<Umask>::operator()(mode_t mode, mode_t *old) {
-		(void)mode;
-		(void)old;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (old != nullptr) {
+			*old = currentUmask;
+		}
+
+		currentUmask = mode & 0777;
+
+		return 0;
 	}
 
 	int Sysdeps<Fchmod>::operator()(int fd, mode_t mode) {
 		(void)fd;
 		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<Fchmodat>::operator()(int fd, const char *pathname, mode_t mode, int flags) {
@@ -583,99 +1047,184 @@ namespace mlibc {
 		(void)pathname;
 		(void)mode;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<Chmod>::operator()(const char *pathname, mode_t mode) {
 		(void)pathname;
 		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<Readlinkat>::operator()(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length) {
 		(void)dirfd;
-		(void)path;
-		(void)buffer;
-		(void)max_size;
-		(void)length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+
+		if (buffer == nullptr or length == nullptr) {
+			return EFAULT;
+		}
+
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(path, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		VfsReadLinkMsgData req {};
+		VfsReadLinkReplyMsgData reply {};
+		fillVfsName(req.path, sizeof(req.path), req.pathLength, resolved);
+
+		const int err = sendVfsRequest(VFS_READLINK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!reply.success) {
+			return vfsStatusToErr(reply.status);
+		}
+
+		const size_t targetLength = reply.targetLength == 0 ? boundedStringLength(reply.target, sizeof(reply.target)) : reply.targetLength - 1;
+		const size_t copyLength = std::min(max_size, targetLength);
+
+		memcpy(buffer, reply.target, copyLength);
+		*length = static_cast<ssize_t>(copyLength);
+
+		return 0;
 	}
 
 	int Sysdeps<Readlink>::operator()(const char *path, void *buffer, size_t max_size, ssize_t *length) {
-		(void)path;
-		(void)buffer;
-		(void)max_size;
-		(void)length;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Readlinkat>(AT_FDCWD, path, buffer, max_size, length);
 	}
 
 	int Sysdeps<Linkat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {
 		(void)olddirfd;
-		(void)old_path;
 		(void)newdirfd;
-		(void)new_path;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolvedOld[VFS_MAX_PATH_LENGTH] {};
+		char resolvedNew[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(old_path, resolvedOld, sizeof(resolvedOld)) or !resolvePath(new_path, resolvedNew, sizeof(resolvedNew))) {
+			return EINVAL;
+		}
+
+		VfsLinkMsgData req {};
+		VfsLinkReplyMsgData reply {};
+		fillVfsName(req.oldPath, sizeof(req.oldPath), req.oldPathLength, resolvedOld);
+		fillVfsName(req.newPath, sizeof(req.newPath), req.newPathLength, resolvedNew);
+
+		const int err = sendVfsRequest(VFS_LINK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Link>::operator()(const char *old_path, const char *new_path) {
-		(void)old_path;
-		(void)new_path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Linkat>(AT_FDCWD, old_path, AT_FDCWD, new_path, 0);
 	}
 
 	int Sysdeps<Symlinkat>::operator()(const char *target_path, int dirfd, const char *link_path) {
-		(void)target_path;
 		(void)dirfd;
-		(void)link_path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolvedLink[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(link_path, resolvedLink, sizeof(resolvedLink)) or target_path == nullptr) {
+			return EINVAL;
+		}
+
+		VfsSymlinkMsgData req {};
+		VfsSymlinkReplyMsgData reply {};
+		fillVfsName(req.target, sizeof(req.target), req.targetLength, target_path);
+		fillVfsName(req.linkPath, sizeof(req.linkPath), req.linkPathLength, resolvedLink);
+
+		const int err = sendVfsRequest(VFS_SYMLINK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Symlink>::operator()(const char *target_path, const char *link_path) {
-		(void)target_path;
-		(void)link_path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Symlinkat>(target_path, AT_FDCWD, link_path);
 	}
 
 	int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
 		(void)dirfd;
-		(void)path;
 		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(path, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		VfsMkdirMsgData req {};
+		VfsMkdirReplyMsgData reply {};
+		fillVfsName(req.path, sizeof(req.path), req.pathLength, resolved);
+
+		const int err = sendVfsRequest(VFS_MKDIR_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
-		(void)path;
-		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Mkdirat>(AT_FDCWD, path, mode);
 	}
 
 	int Sysdeps<Faccessat>::operator()(int dirfd, const char *pathname, int mode, int flags) {
 		(void)dirfd;
-		(void)pathname;
 		(void)mode;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		struct stat st {};
+
+		return sysdep<Stat>(fsfd_target::path, AT_FDCWD, pathname, 0, &st);
 	}
 
 	int Sysdeps<Access>::operator()(const char *path, int mode) {
-		(void)path;
-		(void)mode;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Faccessat>(AT_FDCWD, path, mode, 0);
 	}
 
 	int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
-		(void)fd;
 		(void)flags;
-		(void)newfd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (newfd == nullptr) {
+			return EFAULT;
+		}
+
+		if (fd < 0 or fd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		for (int i = 3; i < maxHorizonFds; ++i) {
+			if (!fdTable[i].used) {
+				fdTable[i] = fdTable[fd];
+				*newfd = i;
+
+				return 0;
+			}
+		}
+
+		return EMFILE;
 	}
 
 	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
-		(void)fd;
 		(void)flags;
-		(void)newfd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or newfd < 0 or newfd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		if (newfd > 2 and fdTable[newfd].used) {
+			sysdep<Close>(newfd);
+		}
+
+		fdTable[newfd] = fdTable[fd];
+
+		return 0;
 	}
 
 	int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
@@ -690,20 +1239,110 @@ namespace mlibc {
 	}
 
 	int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
-		(void)handle;
-		(void)buffer;
-		(void)max_size;
-		(void)bytes_read;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (handle < 0 or handle >= maxHorizonFds or !fdTable[handle].used) {
+			return EBADF;
+		}
+
+		if (buffer == nullptr or bytes_read == nullptr) {
+			return EFAULT;
+		}
+
+		if (fdTable[handle].nodeType != VFS_NODE_DIRECTORY) {
+			return ENOTDIR;
+		}
+
+		VfsHandleReadDirMsgData req {};
+		VfsHandleReadDirReplyMsgData reply {};
+		req.handle = fdTable[handle].handle;
+
+		const int err = sendVfsRequest(VFS_HANDLE_READDIR_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!reply.success) {
+			return vfsStatusToErr(reply.status);
+		}
+
+		size_t written = 0;
+		auto *out = static_cast<char *>(buffer);
+
+		for (uint32_t i = 0; i < reply.entryCount; ++i) {
+			const char *name = reply.entries[i].name;
+			const size_t nameLen = strlen(name);
+			size_t reclen = offsetof(struct dirent, d_name) + nameLen + 1;
+			reclen = (reclen + alignof(struct dirent) - 1) & ~(alignof(struct dirent) - 1);
+
+			if (written + reclen > max_size) {
+				break;
+			}
+
+			auto *entry = reinterpret_cast<struct dirent *>(out + written);
+			memset(entry, 0, reclen);
+			entry->d_ino = reply.entries[i].nodeId;
+			entry->d_off = reply.position;
+			entry->d_reclen = reclen;
+			entry->d_type = nodeTypeToDirentType(reply.entries[i].nodeType);
+			memcpy(entry->d_name, name, nameLen + 1);
+			written += reclen;
+		}
+
+		*bytes_read = written;
+
+		return 0;
 	}
 
 	int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
-		(void)fsfdt;
-		(void)fd;
-		(void)path;
 		(void)flags;
-		(void)statbuf;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+
+		if (statbuf == nullptr) {
+			return EFAULT;
+		}
+
+		VfsStatReplyMsgData reply {};
+
+		if (fsfdt == fsfd_target::fd) {
+			if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+				return EBADF;
+			}
+
+			memset(statbuf, 0, sizeof(*statbuf));
+			statbuf->st_mode = nodeTypeToMode(fdTable[fd].nodeType);
+			statbuf->st_nlink = 1;
+			statbuf->st_blksize = 4096;
+
+			return 0;
+		}
+
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(path, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		VfsStatMsgData req {};
+		fillVfsName(req.path, sizeof(req.path), req.pathLength, resolved);
+
+		const int err = sendVfsRequest(VFS_STAT_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!reply.success) {
+			return vfsStatusToErr(reply.status);
+		}
+
+		memset(statbuf, 0, sizeof(*statbuf));
+		statbuf->st_ino = reply.nodeId;
+		statbuf->st_mode = nodeTypeToMode(reply.nodeType);
+		statbuf->st_nlink = 1;
+		statbuf->st_size = reply.size;
+		statbuf->st_blksize = 4096;
+		statbuf->st_blocks = (reply.size + 511) / 512;
+
+		return 0;
 	}
 
 	int Sysdeps<Rmdir>::operator()(const char *path) {
@@ -712,9 +1351,24 @@ namespace mlibc {
 
 	int Sysdeps<Unlinkat>::operator()(int fd, const char *path, int flags) {
 		(void)fd;
-		(void)path;
 		(void)flags;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(path, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		VfsUnlinkMsgData req {};
+		VfsUnlinkReplyMsgData reply {};
+		fillVfsName(req.path, sizeof(req.path), req.pathLength, resolved);
+
+		const int err = sendVfsRequest(VFS_UNLINK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Rename>::operator()(const char *path, const char *new_path) {
@@ -723,27 +1377,72 @@ namespace mlibc {
 
 	int Sysdeps<Renameat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path) {
 		(void)olddirfd;
-		(void)old_path;
 		(void)newdirfd;
-		(void)new_path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolvedOld[VFS_MAX_PATH_LENGTH] {};
+		char resolvedNew[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(old_path, resolvedOld, sizeof(resolvedOld)) or !resolvePath(new_path, resolvedNew, sizeof(resolvedNew))) {
+			return EINVAL;
+		}
+
+		VfsRenameMsgData req {};
+		VfsRenameReplyMsgData reply {};
+		fillVfsName(req.oldPath, sizeof(req.oldPath), req.oldPathLength, resolvedOld);
+		fillVfsName(req.newPath, sizeof(req.newPath), req.newPathLength, resolvedNew);
+
+		const int err = sendVfsRequest(VFS_RENAME_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
-		(void)fd;
-		(void)request;
-		(void)args;
-		(void)result;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or (!fdTable[fd].used and fd > 2)) {
+			return EBADF;
+		}
+
+		switch (request) {
+			case F_GETFD:
+				*result = 0;
+				return 0;
+			case F_SETFD:
+				(void)va_arg(args, int);
+				*result = 0;
+				return 0;
+			case F_GETFL:
+				*result = fd <= 2 ? O_WRONLY : fdTable[fd].flags;
+				return 0;
+			case F_DUPFD:
+			case F_DUPFD_CLOEXEC: {
+				int minFd = va_arg(args, int);
+
+				if (minFd < 0 or minFd >= maxHorizonFds or fd <= 2) {
+					return EINVAL;
+				}
+
+				for (int i = minFd; i < maxHorizonFds; ++i) {
+					if (!fdTable[i].used) {
+						fdTable[i] = fdTable[fd];
+						*result = i;
+
+						return 0;
+					}
+				}
+
+				return EMFILE;
+			}
+			default:
+				return EINVAL;
+		}
 	}
 
 	int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t mode, int *fd) {
 		(void)dirfd;
-		(void)path;
-		(void)flags;
 		(void)mode;
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return sysdep<Open>(path, flags, mode, fd);
 	}
 
 	int Sysdeps<Mount>::operator()(const char *source, const char *target, const char *fstype, unsigned long flags, const void *data) {
@@ -756,31 +1455,123 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
-		(void)fd;
-		(void)request;
-		(void)arg;
-		(void)result;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		VfsIoctlMsgData req {};
+		VfsIoctlReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+		req.request = request;
+
+		if (arg != nullptr) {
+			req.inputLength = sizeof(uint64_t);
+			memcpy(req.input, &arg, sizeof(arg));
+		}
+
+		const int err = sendVfsRequest(VFS_IOCTL_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (result != nullptr) {
+			*result = 0;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Open>::operator()(const char *pathname, int flags, mode_t mode, int *fd) {
-		(void)pathname;
-		(void)flags;
 		(void)mode;
 
-		if(fd)
+		if(fd) {
 			*fd = -1;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		}
+
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(pathname, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		VfsOpenMsgData req {};
+		VfsOpenReplyMsgData reply {};
+		fillVfsName(req.path, sizeof(req.path), req.pathLength, resolved);
+		req.flags = posixOpenFlagsToVfs(flags);
+
+		const int err = sendVfsRequest(VFS_OPEN_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!reply.success) {
+			return vfsStatusToErr(reply.status);
+		}
+
+		const int localFd = allocFd(reply.handle, reply.nodeType, flags, resolved);
+
+		if (localFd < 0) {
+			VfsCloseMsgData closeReq {};
+			VfsCloseReplyMsgData closeReply {};
+			closeReq.handle = reply.handle;
+			sendVfsRequest(VFS_CLOSE_MSG_TYPE, &closeReq, sizeof(closeReq), &closeReply, sizeof(closeReply));
+
+			return EMFILE;
+		}
+
+		if (fd != nullptr) {
+			*fd = localFd;
+		}
+
+		return 0;
 	};
 
 	int Sysdeps<Read>::operator()(int fd, void *buff, size_t count, ssize_t *bytes_read) {
-		(void)fd;
-		(void)buff;
-		(void)count;
-
-		if(bytes_read)
+		if(bytes_read) {
 			*bytes_read = 0;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		}
+
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		if (buff == nullptr and count != 0) {
+			return EFAULT;
+		}
+
+		size_t done = 0;
+
+		while (done < count) {
+			VfsHandleReadMsgData req {};
+			VfsHandleReadReplyMsgData reply {};
+			req.handle = fdTable[fd].handle;
+			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, count - done));
+
+			const int err = sendVfsRequest(VFS_HANDLE_READ_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+			if (err != 0) {
+				return err;
+			}
+
+			if (!reply.success) {
+				return done != 0 ? 0 : vfsStatusToErr(reply.status);
+			}
+
+			memcpy(static_cast<char *>(buff) + done, reply.data, reply.bytesRead);
+			done += reply.bytesRead;
+
+			if (reply.bytesRead == 0 or reply.bytesRead < req.length) {
+				break;
+			}
+		}
+
+		if (bytes_read != nullptr) {
+			*bytes_read = done;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Write>::operator()(int fd, const void *buff, size_t count, ssize_t *bytes_written) {
@@ -810,23 +1601,101 @@ namespace mlibc {
 			return 0;
 		}
 
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		if (buff == nullptr and count != 0) {
+			return EFAULT;
+		}
+
+		size_t done = 0;
+
+		while (done < count) {
+			VfsHandleWriteMsgData req {};
+			VfsHandleWriteReplyMsgData reply {};
+			req.handle = fdTable[fd].handle;
+			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, count - done));
+			memcpy(req.data, static_cast<const char *>(buff) + done, req.length);
+
+			const int err = sendVfsRequest(VFS_HANDLE_WRITE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+			if (err != 0) {
+				return err;
+			}
+
+			if (!reply.success) {
+				return done != 0 ? 0 : vfsStatusToErr(reply.status);
+			}
+
+			done += reply.bytesWritten;
+
+			if (reply.bytesWritten == 0 or reply.bytesWritten < req.length) {
+				break;
+			}
+		}
+
+		if (bytes_written != nullptr) {
+			*bytes_written = done;
+		}
+
 		return 0;
 	}
 
 	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
-		(void)fd;
-		(void)offset;
-		(void)whence;
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
 
-		if(new_offset)
-			*new_offset = 0;
-		return ESPIPE;
+		VfsHandleSeekMsgData req {};
+		VfsHandleSeekReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+		req.offset = offset;
+		req.whence = whence;
+
+		const int err = sendVfsRequest(VFS_HANDLE_SEEK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!reply.success) {
+			return vfsStatusToErr(reply.status);
+		}
+
+		if(new_offset) {
+			*new_offset = reply.position;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Close>::operator()(int fd) {
-		if(fd >= 0 && fd <= 2)
+		if(fd >= 0 && fd <= 2) {
 			return 0;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		}
+
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		VfsCloseMsgData req {};
+		VfsCloseReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+		const bool closeBackend = !backendHandleHasOtherFd(fd);
+		fdTable[fd] = HorizonFd();
+
+		if (!closeBackend) {
+			return 0;
+		}
+
+		const int err = sendVfsRequest(VFS_CLOSE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	// Stubs
@@ -859,9 +1728,44 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Flock>::operator()(int fd, int options) {
-		(void)fd;
-		(void)options;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		constexpr int HOS_LOCK_SH = 1;
+		constexpr int HOS_LOCK_EX = 2;
+		constexpr int HOS_LOCK_UN = 8;
+
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		if ((options & HOS_LOCK_UN) != 0) {
+			VfsUnlockMsgData req {};
+			VfsUnlockReplyMsgData reply {};
+			req.handle = fdTable[fd].handle;
+
+			const int err = sendVfsRequest(VFS_UNLOCK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+			if (err != 0) {
+				return err;
+			}
+
+			return reply.success ? 0 : vfsStatusToErr(reply.status);
+		}
+
+		VfsLockMsgData req {};
+		VfsLockReplyMsgData reply {};
+		req.handle = fdTable[fd].handle;
+		req.mode = (options & HOS_LOCK_EX) != 0 ? VFS_LOCK_EXCLUSIVE : VFS_LOCK_SHARED;
+
+		if ((options & (HOS_LOCK_SH | HOS_LOCK_EX)) == 0) {
+			return EINVAL;
+		}
+
+		const int err = sendVfsRequest(VFS_LOCK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+		if (err != 0) {
+			return err;
+		}
+
+		return reply.success ? 0 : vfsStatusToErr(reply.status);
 	}
 
 	int Sysdeps<Nice>::operator()(int nice, int *ret) {
@@ -889,67 +1793,75 @@ namespace mlibc {
 	}
 
 	int Sysdeps<SetUid>::operator()(uid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return id == 0 ? 0 : EPERM;
 	}
 
 	int Sysdeps<SetGid>::operator()(gid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return id == 0 ? 0 : EPERM;
 	}
 
 	int Sysdeps<SetEuid>::operator()(uid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return id == 0 ? 0 : EPERM;
 	}
 
 	int Sysdeps<SetEgid>::operator()(gid_t id) {
-		(void)id;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return id == 0 ? 0 : EPERM;
 	}
 
 	uid_t Sysdeps<GetUid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	uid_t Sysdeps<GetEuid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	gid_t Sysdeps<GetGid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	gid_t Sysdeps<GetEgid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<SetResuid>::operator()(uid_t _ruid, uid_t _euid, uid_t _suid) {
-		(void)_ruid;
-		(void)_euid;
-		(void)_suid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return _ruid == 0 and _euid == 0 and _suid == 0 ? 0 : EPERM;
 	}
 
 	int Sysdeps<SetResgid>::operator()(gid_t _rgid, gid_t _egid, gid_t _sgid) {
-		(void)_rgid;
-		(void)_egid;
-		(void)_sgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return _rgid == 0 and _egid == 0 and _sgid == 0 ? 0 : EPERM;
 	}
 
 	int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
-		(void)ruid;
-		(void)euid;
-		(void)suid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (ruid != nullptr) {
+			*ruid = 0;
+		}
+
+		if (euid != nullptr) {
+			*euid = 0;
+		}
+
+		if (suid != nullptr) {
+			*suid = 0;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
-		(void)rgid;
-		(void)egid;
-		(void)sgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (rgid != nullptr) {
+			*rgid = 0;
+		}
+
+		if (egid != nullptr) {
+			*egid = 0;
+		}
+
+		if (sgid != nullptr) {
+			*sgid = 0;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Chroot>::operator()(const char *path) {
@@ -995,40 +1907,61 @@ namespace mlibc {
 	}
 
 	pid_t Sysdeps<GetPpid>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return 0;
 	}
 
 	int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *pgid) {
 		(void)pid;
-		(void)pgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (pgid != nullptr) {
+			*pgid = 0;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
 		(void)pid;
-		(void)pgid;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (pgid != nullptr) {
+			*pgid = 0;
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
-		(void)buffer;
-		(void)bufsize;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (buffer == nullptr or bufsize == 0) {
+			return EINVAL;
+		}
+
+		return copyString(buffer, bufsize, "horizonos") ? 0 : ENAMETOOLONG;
 	}
 
 	int Sysdeps<SetHostname>::operator()(const char *buffer, size_t bufsize) {
 		(void)buffer;
 		(void)bufsize;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		return EPERM;
 	}
 
 	int Sysdeps<Uname>::operator()(struct utsname *buf) {
-		(void)buf;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (buf == nullptr) {
+			return EFAULT;
+		}
+
+		memset(buf, 0, sizeof(*buf));
+		copyString(buf->sysname, sizeof(buf->sysname), "HorizonOS");
+		copyString(buf->nodename, sizeof(buf->nodename), "horizonos");
+		copyString(buf->release, sizeof(buf->release), "0.0.0");
+		copyString(buf->version, sizeof(buf->version), "0.0.0");
+		copyString(buf->machine, sizeof(buf->machine), "x86_64");
+
+		return 0;
 	}
 
 	void Sysdeps<Sync>::operator()() {
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		VfsSyncMsgData req {};
+		VfsSyncReplyMsgData reply {};
+		fillVfsName(req.volume, sizeof(req.volume), req.volumeLength, "HorizonOS");
+		sendVfsRequest(VFS_SYNC_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 	}
 
 	int Sysdeps<Sigaltstack>::operator()(const stack_t *ss, stack_t *oss) {
@@ -1117,13 +2050,40 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Chdir>::operator()(const char *path) {
-		(void)path;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		char resolved[VFS_MAX_PATH_LENGTH] {};
+
+		if (!resolvePath(path, resolved, sizeof(resolved))) {
+			return EINVAL;
+		}
+
+		struct stat st {};
+		const int err = sysdep<Stat>(fsfd_target::path, AT_FDCWD, resolved, 0, &st);
+
+		if (err != 0) {
+			return err;
+		}
+
+		if (!S_ISDIR(st.st_mode)) {
+			return ENOTDIR;
+		}
+
+		copyString(currentDirectory, sizeof(currentDirectory), resolved);
+
+		return 0;
 	}
 
 	int Sysdeps<Fchdir>::operator()(int fd) {
-		(void)fd;
-		panic_unimplemented_sysdep(__PRETTY_FUNCTION__);
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return EBADF;
+		}
+
+		if (fdTable[fd].nodeType != VFS_NODE_DIRECTORY) {
+			return ENOTDIR;
+		}
+
+		copyString(currentDirectory, sizeof(currentDirectory), fdTable[fd].path);
+
+		return 0;
 	}
 
 	int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve) {
