@@ -20,6 +20,8 @@
 
 #include <algorithm>
 
+using namespace horizonos;
+
 int register_horizonos_port(long *ret, uint64_t preferredPort) {
 	return syscall(SYSCALL_PORTREGISTER, ret, preferredPort);
 }
@@ -96,107 +98,12 @@ int freePhysPage(uint64_t physPage) {
 	return syscall(SYSCALL_FREE_PHYS_PAGE, nullptr, physPage);
 }
 
-int registerVfsService(uint64_t port) {
-	return syscall(SYSCALL_REGISTER_VFS, nullptr, port);
-}
-
 int registerKernelEventHandler(uint64_t port, uint64_t eventMask) {
 	return syscall(SYSCALL_REGISTER_EVENT_HANDLER, nullptr, port, eventMask);
 }
 
-int sendVfsRequest(uint64_t requestType, const void *request, size_t requestLength, void *reply, size_t replyLength) {
-	return syscall(SYSCALL_VFS_REQUEST, nullptr, requestType, reinterpret_cast<uint64_t>(request), requestLength, reinterpret_cast<uint64_t>(reply), replyLength);
-}
-
 namespace {
-	constexpr uint64_t VFS_STAT_MSG_TYPE = 0x90000;
-	constexpr uint64_t VFS_OPEN_MSG_TYPE = 0x9000A;
-	constexpr uint64_t VFS_CLOSE_MSG_TYPE = 0x9000C;
-	constexpr uint64_t VFS_HANDLE_READ_MSG_TYPE = 0x9000E;
-	constexpr uint64_t VFS_HANDLE_WRITE_MSG_TYPE = 0x90010;
-	constexpr uint64_t VFS_UNLINK_MSG_TYPE = 0x90012;
-	constexpr uint64_t VFS_RENAME_MSG_TYPE = 0x90014;
-	constexpr uint64_t VFS_HANDLE_SEEK_MSG_TYPE = 0x90018;
-	constexpr uint64_t VFS_MKDIR_MSG_TYPE = 0x9001A;
-	constexpr uint64_t VFS_LOCK_MSG_TYPE = 0x90020;
-	constexpr uint64_t VFS_UNLOCK_MSG_TYPE = 0x90022;
-	constexpr uint64_t VFS_SYNC_MSG_TYPE = 0x90024;
-	constexpr uint64_t VFS_FSYNC_MSG_TYPE = 0x90026;
-	constexpr uint64_t VFS_LINK_MSG_TYPE = 0x9002A;
-	constexpr uint64_t VFS_SYMLINK_MSG_TYPE = 0x9002C;
-	constexpr uint64_t VFS_IOCTL_MSG_TYPE = 0x90032;
-	constexpr uint64_t VFS_HANDLE_READDIR_MSG_TYPE = 0x90034;
-	constexpr uint64_t VFS_READLINK_MSG_TYPE = 0x90036;
-	constexpr uint64_t VFS_HANDLE_TRUNCATE_MSG_TYPE = 0x90038;
-
-	constexpr uint32_t VFS_MAX_PATH_LENGTH = 256;
-	constexpr uint32_t VFS_MAX_READ_SIZE = 2048;
-	constexpr uint32_t VFS_MAX_NAME_LENGTH = 64;
-	constexpr uint32_t VFS_MAX_DIR_ENTRIES = 32;
-
-	constexpr uint8_t VFS_NODE_FILE = 1;
-	constexpr uint8_t VFS_NODE_DIRECTORY = 2;
-	constexpr uint8_t VFS_NODE_SYMLINK = 3;
-	constexpr uint8_t VFS_NODE_DEVICE = 4;
-
-	constexpr uint32_t VFS_OPEN_READ = 1 << 0;
-	constexpr uint32_t VFS_OPEN_WRITE = 1 << 1;
-	constexpr uint32_t VFS_OPEN_CREATE = 1 << 2;
-	constexpr uint32_t VFS_OPEN_APPEND = 1 << 3;
-	constexpr uint32_t VFS_OPEN_TRUNCATE = 1 << 4;
-	constexpr uint32_t VFS_OPEN_EXCLUSIVE = 1 << 5;
-	constexpr uint8_t VFS_LOCK_SHARED = 1;
-	constexpr uint8_t VFS_LOCK_EXCLUSIVE = 2;
-
-	struct VfsDirEntry {
-		char name[VFS_MAX_NAME_LENGTH] {};
-		size_t nameLength {};
-		uint8_t nodeType {};
-		uint64_t size {};
-		uint64_t nodeId {};
-	};
-
-	struct VfsStatMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
-	struct VfsStatReplyMsgData { bool success {}; uint8_t nodeType {}; uint64_t size {}; uint64_t nodeId {}; uint32_t status {}; };
-	struct VfsReadDirReplyMsgData { bool success {}; uint32_t entryCount {}; VfsDirEntry entries[VFS_MAX_DIR_ENTRIES] {}; uint32_t nextOffset {}; bool hasMore {}; uint32_t status {}; };
-	struct VfsOpenMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; uint32_t flags {}; };
-	struct VfsOpenReplyMsgData { bool success {}; uint64_t handle {}; uint8_t nodeType {}; uint64_t size {}; uint32_t status {}; uint64_t nodeId {}; };
-	struct VfsCloseMsgData { uint64_t handle {}; };
-	struct VfsCloseReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsHandleReadMsgData { uint64_t handle {}; uint32_t length {}; };
-	struct VfsHandleReadReplyMsgData { bool success {}; uint32_t bytesRead {}; uint64_t position {}; uint8_t data[VFS_MAX_READ_SIZE] {}; uint32_t status {}; };
-	struct VfsHandleWriteMsgData { uint64_t handle {}; uint32_t length {}; uint8_t data[VFS_MAX_READ_SIZE] {}; };
-	struct VfsHandleWriteReplyMsgData { bool success {}; uint32_t bytesWritten {}; uint64_t position {}; uint64_t size {}; uint32_t status {}; };
-	struct VfsHandleSeekMsgData { uint64_t handle {}; int64_t offset {}; uint8_t whence {}; };
-	struct VfsHandleSeekReplyMsgData { bool success {}; uint64_t position {}; uint32_t status {}; };
-	struct VfsHandleReadDirMsgData { uint64_t handle {}; };
-	struct VfsHandleReadDirReplyMsgData { bool success {}; uint32_t entryCount {}; VfsDirEntry entries[VFS_MAX_DIR_ENTRIES] {}; uint64_t position {}; bool hasMore {}; uint32_t status {}; };
-	struct VfsUnlinkMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
-	struct VfsUnlinkReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsRenameMsgData { char oldPath[VFS_MAX_PATH_LENGTH] {}; size_t oldPathLength {}; char newPath[VFS_MAX_PATH_LENGTH] {}; size_t newPathLength {}; };
-	struct VfsRenameReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsTruncateMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; uint64_t size {}; };
-	struct VfsTruncateReplyMsgData { bool success {}; uint64_t size {}; uint32_t status {}; };
-	struct VfsMkdirMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
-	struct VfsMkdirReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
-	struct VfsLockMsgData { uint64_t handle {}; uint64_t offset {}; uint64_t length {}; uint8_t mode {}; };
-	struct VfsLockReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsUnlockMsgData { uint64_t handle {}; uint64_t offset {}; uint64_t length {}; };
-	struct VfsUnlockReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsSyncMsgData { char volume[VFS_MAX_NAME_LENGTH] {}; size_t volumeLength {}; };
-	struct VfsSyncReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsFsyncMsgData { uint64_t handle {}; };
-	struct VfsFsyncReplyMsgData { bool success {}; uint32_t status {}; };
-	struct VfsLinkMsgData { char oldPath[VFS_MAX_PATH_LENGTH] {}; size_t oldPathLength {}; char newPath[VFS_MAX_PATH_LENGTH] {}; size_t newPathLength {}; };
-	struct VfsLinkReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
-	struct VfsSymlinkMsgData { char target[VFS_MAX_PATH_LENGTH] {}; size_t targetLength {}; char linkPath[VFS_MAX_PATH_LENGTH] {}; size_t linkPathLength {}; };
-	struct VfsSymlinkReplyMsgData { bool success {}; uint32_t status {}; uint64_t nodeId {}; };
-	struct VfsReadLinkMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
-	struct VfsReadLinkReplyMsgData { bool success {}; uint32_t status {}; char target[VFS_MAX_PATH_LENGTH] {}; size_t targetLength {}; };
-	struct VfsIoctlMsgData { uint64_t handle {}; uint32_t request {}; uint32_t inputLength {}; uint8_t input[VFS_MAX_READ_SIZE] {}; };
-	struct VfsIoctlReplyMsgData { bool success {}; uint32_t status {}; uint32_t outputLength {}; uint8_t output[VFS_MAX_READ_SIZE] {}; };
-	struct VfsHandleTruncateMsgData { uint64_t handle {}; uint64_t size {}; };
-	struct VfsHandleTruncateReplyMsgData { bool success {}; uint64_t size {}; uint32_t status {}; };
+	constexpr size_t VFS_CLIENT_PORT_CACHE_SIZE = 128;
 
 	struct HorizonFd {
 		bool used {};
@@ -357,6 +264,121 @@ namespace {
 		}
 	}
 
+	uint64_t currentThreadVfsPort(uint64_t *ownerKey) {
+		long tid = 0;
+		long pid = 0;
+
+		syscall(SYSCALL_GETTID, &tid);
+		syscall(SYSCALL_GETPID, &pid);
+
+		const uint64_t key = ((static_cast<uint64_t>(pid) & 0xffff) << 32) | (static_cast<uint64_t>(tid) & 0xffffffff);
+
+		if (ownerKey != nullptr) {
+			*ownerKey = key;
+		}
+
+		return VFS_CLIENT_PORT_BASE | key;
+	}
+
+	int ensureCurrentThreadVfsPort(uint64_t *port) {
+		if (port == nullptr) {
+			return EINVAL;
+		}
+
+		static uint64_t cachedClientKeys[VFS_CLIENT_PORT_CACHE_SIZE] {};
+		static uint64_t cachedClientPorts[VFS_CLIENT_PORT_CACHE_SIZE] {};
+
+		uint64_t ownerKey = 0;
+		const uint64_t preferredPort = currentThreadVfsPort(&ownerKey);
+
+		for (size_t i = 0; i < VFS_CLIENT_PORT_CACHE_SIZE; ++i) {
+			const uint64_t cachedKey = __atomic_load_n(&cachedClientKeys[i], __ATOMIC_ACQUIRE);
+
+			if (cachedKey != ownerKey) {
+				continue;
+			}
+
+			const uint64_t cachedPort = __atomic_load_n(&cachedClientPorts[i], __ATOMIC_ACQUIRE);
+
+			if (cachedPort != 0) {
+				*port = cachedPort;
+				return 0;
+			}
+		}
+
+		long registeredPort = 0;
+		const int err = register_horizonos_port(&registeredPort, preferredPort);
+
+		if (err != 0 and err != EEXIST) {
+			return err;
+		}
+
+		const size_t slot = ownerKey % VFS_CLIENT_PORT_CACHE_SIZE;
+
+		__atomic_store_n(&cachedClientPorts[slot], preferredPort, __ATOMIC_RELEASE);
+		__atomic_store_n(&cachedClientKeys[slot], ownerKey, __ATOMIC_RELEASE);
+
+		*port = preferredPort;
+
+		return 0;
+	}
+
+	int resolveVfsPort(uint64_t clientPort, uint64_t *port) {
+		static uint64_t cachedVfsPort = 0;
+
+		if (port == nullptr) {
+			return EINVAL;
+		}
+
+		if (cachedVfsPort != 0) {
+			*port = cachedVfsPort;
+			return 0;
+		}
+
+		for (;;) {
+			GetMsgData req {};
+			GetReplyMsgData reply {};
+			fillVfsName(req.name, sizeof(req.name), req.nameLength, "Vfs");
+
+			hos_msg msg {};
+			msg.type = GET_MSG_TYPE;
+			msg.port = NAME_REGISTRY_PORT;
+			msg.buffer = &req;
+			msg.length = sizeof(req);
+
+			const int sendErr = send_horizonos_message(clientPort, NAME_REGISTRY_PORT, &msg);
+
+			if (sendErr != 0) {
+				return sendErr;
+			}
+
+			hos_msg recv {};
+			recv.buffer = &reply;
+			recv.length = sizeof(reply);
+
+			uint64_t whiteListType = REPLY_GET_MSG_TYPE;
+			filter_options filter {};
+			filter.whiteListTypes = &whiteListType;
+			filter.whiteListCount = 1;
+
+			const int recvErr = receive_horizonos_message(clientPort, &recv, &filter);
+
+			if (recvErr != 0) {
+				return recvErr;
+			}
+
+			if (reply.port != 0) {
+				cachedVfsPort = reply.port;
+				*port = reply.port;
+				return 0;
+			}
+
+			long secs = 0;
+			long nanos = 10'000'000;
+			syscall(SYSCALL_NANOSLEEP, nullptr, reinterpret_cast<uint64_t>(&secs), reinterpret_cast<uint64_t>(&nanos));
+		}
+	}
+
 	int vfsStatusToErr(uint32_t status) {
 		return status == 0 ? EIO : static_cast<int>(status);
 	}
@@ -406,6 +428,49 @@ namespace {
 				return DT_UNKNOWN;
 		}
 	}
+}
+
+int sendVfsRequest(uint64_t requestType, const void *request, size_t requestLength, void *reply, size_t replyLength) {
+	if (requestType == 0 or reply == nullptr or replyLength == 0 or (requestLength != 0 and request == nullptr)) {
+		return EINVAL;
+	}
+
+	uint64_t clientPort = 0;
+	int err = ensureCurrentThreadVfsPort(&clientPort);
+
+	if (err != 0) {
+		return err;
+	}
+
+	uint64_t vfsPort = 0;
+	err = resolveVfsPort(clientPort, &vfsPort);
+
+	if (err != 0) {
+		return err;
+	}
+
+	hos_msg send {};
+	send.type = requestType;
+	send.port = vfsPort;
+	send.buffer = const_cast<void *>(request);
+	send.length = requestLength;
+
+	err = send_horizonos_message(clientPort, vfsPort, &send);
+
+	if (err != 0) {
+		return err;
+	}
+
+	hos_msg recv {};
+	recv.buffer = reply;
+	recv.length = replyLength;
+
+	uint64_t whiteListType = requestType + 1;
+	filter_options filter {};
+	filter.whiteListTypes = &whiteListType;
+	filter.whiteListCount = 1;
+
+	return receive_horizonos_message(clientPort, &recv, &filter);
 }
 
 namespace mlibc {
