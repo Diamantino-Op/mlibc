@@ -709,6 +709,10 @@ namespace mlibc {
 	// IsaTTY
 
 	int Sysdeps<Isatty>::operator()(int fd) {
+		if (fd == 1 or fd == 2) {
+			return 0;
+		}
+
 		return syscall(SYSCALL_ISATTY, nullptr, fd);
 	}
 
@@ -1708,6 +1712,10 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offset) {
+		if (fd == 1 or fd == 2) {
+			return ESPIPE;
+		}
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
