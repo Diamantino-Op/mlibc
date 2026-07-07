@@ -724,12 +724,18 @@ namespace mlibc {
 // Alloc
 
 	int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
-		size += 4096 - (size % 4096);
+		if (size % 4096) {
+			size += 4096 - (size % 4096);
+		}
+
 		return sysdep<VmMap>(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, 0, pointer);
 	}
 
 	int Sysdeps<AnonFree>::operator()(void *pointer, size_t size) {
-		size += 4096 - (size % 4096);
+		if (size % 4096) {
+			size += 4096 - (size % 4096);
+		}
+
 		return sysdep<VmUnmap>(pointer, size);
 	}
 
