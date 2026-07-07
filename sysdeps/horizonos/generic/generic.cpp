@@ -493,12 +493,56 @@ namespace mlibc {
 	// Map
 
 	int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
+		const bool fileBacked = fd >= 0 && (flags & MAP_ANON) == 0;
+		const int mapProt = fileBacked && prot != PROT_NONE ? (prot | PROT_WRITE) : prot;
+		const int mapFlags = fileBacked ? (flags | MAP_ANON) : flags;
 		long ret;
-		long err = syscall(SYSCALL_MMAP, &ret, reinterpret_cast<uint64_t>(hint), size, prot, flags, fd, offset);
+		long err = syscall(SYSCALL_MMAP, &ret, reinterpret_cast<uint64_t>(hint), size, mapProt, mapFlags, fileBacked ? -1 : fd, fileBacked ? 0 : offset);
+
+		if (err != 0) {
+			*window = (void *)ret;
+
+			return err;
+		}
 
 		*window = (void *)ret;
 
-		return err;
+		if (!fileBacked || prot == PROT_NONE) {
+			return 0;
+		}
+
+		size_t done = 0;
+
+		while (done < size) {
+			ssize_t bytesRead = 0;
+			err = sysdep<Pread>(fd, static_cast<char *>(*window) + done, size - done, offset + done, &bytesRead);
+
+			if (err != 0) {
+				sysdep<VmUnmap>(*window, size);
+				*window = MAP_FAILED;
+
+				return err;
+			}
+
+			if (bytesRead <= 0) {
+				break;
+			}
+
+			done += static_cast<size_t>(bytesRead);
+		}
+
+		if (mapProt != prot) {
+			err = sysdep<VmProtect>(*window, size, prot);
+
+			if (err != 0) {
+				sysdep<VmUnmap>(*window, size);
+				*window = MAP_FAILED;
+
+				return err;
+			}
+		}
+
+		return 0;
 	}
 
 	// Unmap
