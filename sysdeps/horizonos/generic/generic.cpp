@@ -115,8 +115,24 @@ namespace {
 
 	constexpr int maxHorizonFds = 256;
 	HorizonFd fdTable[maxHorizonFds] {};
+	bool fdTableLock {};
 	char currentDirectory[VFS_MAX_PATH_LENGTH] = "HorizonOS:/";
 	mode_t currentUmask = 022;
+
+	struct FdTableGuard {
+		FdTableGuard() {
+			while (__atomic_test_and_set(&fdTableLock, __ATOMIC_ACQUIRE)) {
+				__builtin_ia32_pause();
+			}
+		}
+
+		~FdTableGuard() {
+			__atomic_clear(&fdTableLock, __ATOMIC_RELEASE);
+		}
+
+		FdTableGuard(const FdTableGuard &) = delete;
+		auto operator=(const FdTableGuard &) -> FdTableGuard & = delete;
+	};
 
 	size_t boundedStringLength(const char *str, size_t maxLength) {
 		size_t length = 0;
@@ -223,6 +239,8 @@ namespace {
 	}
 
 	int allocFd(uint64_t handle, uint8_t nodeType, int flags, const char *path) {
+		FdTableGuard guard;
+
 		for (int fd = 3; fd < maxHorizonFds; ++fd) {
 			if (!fdTable[fd].used) {
 				fdTable[fd].used = true;
@@ -239,6 +257,8 @@ namespace {
 	}
 
 	bool fdValid(int fd) {
+		FdTableGuard guard;
+
 		return fd >= 0 and fd < maxHorizonFds and fdTable[fd].used;
 	}
 
@@ -997,6 +1017,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Fsync>::operator()(int fd) {
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1036,6 +1058,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1315,6 +1339,8 @@ namespace mlibc {
 			return EFAULT;
 		}
 
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1333,12 +1359,30 @@ namespace mlibc {
 
 	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 		(void)flags;
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or newfd < 0 or newfd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
 			return EBADF;
 		}
 
-		if (newfd > 2 and fdTable[newfd].used) {
-			sysdep<Close>(newfd);
+		if (fd == newfd) {
+			return 0;
+		}
+
+		if (newfd > 2 && fdTable[newfd].used) {
+			VfsCloseMsgData req {};
+			VfsCloseReplyMsgData reply {};
+			req.handle = fdTable[newfd].handle;
+			const bool closeBackend = !backendHandleHasOtherFd(newfd);
+			fdTable[newfd] = HorizonFd();
+
+			if (closeBackend) {
+				const int err = sendVfsRequest(VFS_CLOSE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+				if (err != 0) {
+					return err;
+				}
+			}
 		}
 
 		fdTable[newfd] = fdTable[fd];
@@ -1358,6 +1402,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
+		FdTableGuard guard;
+
 		if (handle < 0 or handle >= maxHorizonFds or !fdTable[handle].used) {
 			return EBADF;
 		}
@@ -1422,6 +1468,8 @@ namespace mlibc {
 		VfsStatReplyMsgData reply {};
 
 		if (fsfdt == fsfd_target::fd) {
+			FdTableGuard guard;
+
 			if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 				return EBADF;
 			}
@@ -1519,6 +1567,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or (!fdTable[fd].used and fd > 2)) {
 			return EBADF;
 		}
@@ -1574,6 +1624,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1652,6 +1704,8 @@ namespace mlibc {
 			*bytes_read = 0;
 		}
 
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1720,6 +1774,8 @@ namespace mlibc {
 			return 0;
 		}
 
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1766,6 +1822,8 @@ namespace mlibc {
 			return ESPIPE;
 		}
 
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
@@ -1797,6 +1855,8 @@ namespace mlibc {
 		if(fd >= 0 && fd <= 2) {
 			return 0;
 		}
+
+		FdTableGuard guard;
 
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
@@ -1854,6 +1914,8 @@ namespace mlibc {
 		constexpr int HOS_LOCK_SH = 1;
 		constexpr int HOS_LOCK_EX = 2;
 		constexpr int HOS_LOCK_UN = 8;
+
+		FdTableGuard guard;
 
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
@@ -2196,6 +2258,8 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Fchdir>::operator()(int fd) {
+		FdTableGuard guard;
+
 		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
 			return EBADF;
 		}
