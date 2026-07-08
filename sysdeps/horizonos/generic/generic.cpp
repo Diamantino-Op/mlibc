@@ -719,9 +719,9 @@ namespace mlibc {
 			auto *newTcb = reinterpret_cast<Tcb *>(tcb);
 			__atomic_store_n(&newTcb->tid, static_cast<int>(ret), __ATOMIC_RELAXED);
 			mlibc::sysdep<FutexWake>(&newTcb->tid, true);
+			*pid_out = ret;
 		}
 
-		*pid_out = ret;
 		return err;
 	}
 
