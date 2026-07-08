@@ -262,6 +262,17 @@ namespace {
 		return fd >= 0 and fd < maxHorizonFds and fdTable[fd].used;
 	}
 
+	bool fdSnapshot(int fd, HorizonFd &out) {
+		FdTableGuard guard;
+
+		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+			return false;
+		}
+
+		out = fdTable[fd];
+		return true;
+	}
+
 	bool backendHandleHasOtherFd(int fd) {
 		const uint64_t handle = fdTable[fd].handle;
 
@@ -979,53 +990,129 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Pread>::operator()(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
-		off_t oldOffset = 0;
-		off_t ignored = 0;
-		int err = sysdep<Seek>(fd, 0, SEEK_CUR, &oldOffset);
-
-		if (err != 0) {
-			return err;
+		if (bytes_read != nullptr) {
+			*bytes_read = 0;
 		}
 
-		if ((err = sysdep<Seek>(fd, off, SEEK_SET, &ignored)) != 0) {
-			return err;
+		if (buf == nullptr and n != 0) {
+			return EFAULT;
 		}
 
-		err = sysdep<Read>(fd, buf, n, bytes_read);
-		sysdep<Seek>(fd, oldOffset, SEEK_SET, &ignored);
+		if (off < 0) {
+			return EINVAL;
+		}
 
-		return err;
+		HorizonFd file {};
+
+		if (!fdSnapshot(fd, file)) {
+			return EBADF;
+		}
+
+		if ((file.flags & O_ACCMODE) == O_WRONLY) {
+			return EBADF;
+		}
+
+		size_t done = 0;
+
+		while (done < n) {
+			VfsReadMsgData req {};
+			VfsReadReplyMsgData reply {};
+			req.offset = static_cast<uint64_t>(off) + done;
+			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, n - done));
+			fillVfsName(req.path, sizeof(req.path), req.pathLength, file.path);
+
+			const int err = sendVfsRequest(VFS_READ_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+			if (err != 0) {
+				return err;
+			}
+
+			if (!reply.success) {
+				return done != 0 ? 0 : EIO;
+			}
+
+			memcpy(static_cast<char *>(buf) + done, reply.data, reply.bytesRead);
+			done += reply.bytesRead;
+
+			if (reply.bytesRead == 0 or reply.bytesRead < req.length) {
+				break;
+			}
+		}
+
+		if (bytes_read != nullptr) {
+			*bytes_read = static_cast<ssize_t>(done);
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Pwrite>::operator()(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_written) {
-		off_t oldOffset = 0;
-		off_t ignored = 0;
-		int err = sysdep<Seek>(fd, 0, SEEK_CUR, &oldOffset);
-
-		if (err != 0) {
-			return err;
+		if (bytes_written != nullptr) {
+			*bytes_written = 0;
 		}
 
-		if ((err = sysdep<Seek>(fd, off, SEEK_SET, &ignored)) != 0) {
-			return err;
+		if (buf == nullptr and n != 0) {
+			return EFAULT;
 		}
 
-		err = sysdep<Write>(fd, buf, n, bytes_written);
-		sysdep<Seek>(fd, oldOffset, SEEK_SET, &ignored);
+		if (off < 0) {
+			return EINVAL;
+		}
 
-		return err;
+		HorizonFd file {};
+
+		if (!fdSnapshot(fd, file)) {
+			return EBADF;
+		}
+
+		if ((file.flags & O_ACCMODE) == O_RDONLY) {
+			return EBADF;
+		}
+
+		size_t done = 0;
+
+		while (done < n) {
+			VfsWriteMsgData req {};
+			VfsWriteReplyMsgData reply {};
+			req.offset = static_cast<uint64_t>(off) + done;
+			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, n - done));
+			memcpy(req.data, static_cast<const char *>(buf) + done, req.length);
+			fillVfsName(req.path, sizeof(req.path), req.pathLength, file.path);
+
+			const int err = sendVfsRequest(VFS_WRITE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
+
+			if (err != 0) {
+				return err;
+			}
+
+			if (!reply.success) {
+				return done != 0 ? 0 : vfsStatusToErr(reply.status);
+			}
+
+			done += reply.bytesWritten;
+
+			if (reply.bytesWritten == 0 or reply.bytesWritten < req.length) {
+				break;
+			}
+		}
+
+		if (bytes_written != nullptr) {
+			*bytes_written = static_cast<ssize_t>(done);
+		}
+
+		return 0;
 	}
 
 	int Sysdeps<Fsync>::operator()(int fd) {
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
 		VfsFsyncMsgData req {};
 		VfsFsyncReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
+		req.handle = file.handle;
 
 		const int err = sendVfsRequest(VFS_FSYNC_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 
@@ -1058,15 +1145,15 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Ftruncate>::operator()(int fd, size_t size) {
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
 		VfsHandleTruncateMsgData req {};
 		VfsHandleTruncateReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
+		req.handle = file.handle;
 		req.size = size;
 
 		const int err = sendVfsRequest(VFS_HANDLE_TRUNCATE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
@@ -1359,33 +1446,37 @@ namespace mlibc {
 
 	int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 		(void)flags;
-		FdTableGuard guard;
+		bool closeBackend = false;
+		VfsCloseMsgData req {};
 
-		if (fd < 0 or fd >= maxHorizonFds or newfd < 0 or newfd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
-			return EBADF;
+		{
+			FdTableGuard guard;
+
+			if (fd < 0 or fd >= maxHorizonFds or newfd < 0 or newfd >= maxHorizonFds or fd <= 2 or !fdTable[fd].used) {
+				return EBADF;
+			}
+
+			if (fd == newfd) {
+				return 0;
+			}
+
+			if (newfd > 2 && fdTable[newfd].used) {
+				req.handle = fdTable[newfd].handle;
+				closeBackend = !backendHandleHasOtherFd(newfd);
+				fdTable[newfd] = HorizonFd();
+			}
+
+			fdTable[newfd] = fdTable[fd];
 		}
 
-		if (fd == newfd) {
-			return 0;
-		}
-
-		if (newfd > 2 && fdTable[newfd].used) {
-			VfsCloseMsgData req {};
+		if (closeBackend) {
 			VfsCloseReplyMsgData reply {};
-			req.handle = fdTable[newfd].handle;
-			const bool closeBackend = !backendHandleHasOtherFd(newfd);
-			fdTable[newfd] = HorizonFd();
+			const int err = sendVfsRequest(VFS_CLOSE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 
-			if (closeBackend) {
-				const int err = sendVfsRequest(VFS_CLOSE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
-
-				if (err != 0) {
-					return err;
-				}
+			if (err != 0) {
+				return err;
 			}
 		}
-
-		fdTable[newfd] = fdTable[fd];
 
 		return 0;
 	}
@@ -1402,23 +1493,23 @@ namespace mlibc {
 	}
 
 	int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
-		FdTableGuard guard;
-
-		if (handle < 0 or handle >= maxHorizonFds or !fdTable[handle].used) {
-			return EBADF;
-		}
-
 		if (buffer == nullptr or bytes_read == nullptr) {
 			return EFAULT;
 		}
 
-		if (fdTable[handle].nodeType != VFS_NODE_DIRECTORY) {
+		HorizonFd file {};
+
+		if (!fdSnapshot(handle, file)) {
+			return EBADF;
+		}
+
+		if (file.nodeType != VFS_NODE_DIRECTORY) {
 			return ENOTDIR;
 		}
 
 		VfsHandleReadDirMsgData req {};
 		VfsHandleReadDirReplyMsgData reply {};
-		req.handle = fdTable[handle].handle;
+		req.handle = file.handle;
 
 		const int err = sendVfsRequest(VFS_HANDLE_READDIR_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 
@@ -1624,15 +1715,15 @@ namespace mlibc {
 	}
 
 	int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
 		VfsIoctlMsgData req {};
 		VfsIoctlReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
+		req.handle = file.handle;
 		req.request = request;
 
 		if (arg != nullptr) {
@@ -1704,9 +1795,9 @@ namespace mlibc {
 			*bytes_read = 0;
 		}
 
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
@@ -1719,7 +1810,7 @@ namespace mlibc {
 		while (done < count) {
 			VfsHandleReadMsgData req {};
 			VfsHandleReadReplyMsgData reply {};
-			req.handle = fdTable[fd].handle;
+			req.handle = file.handle;
 			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, count - done));
 
 			const int err = sendVfsRequest(VFS_HANDLE_READ_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
@@ -1774,9 +1865,9 @@ namespace mlibc {
 			return 0;
 		}
 
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
@@ -1789,7 +1880,7 @@ namespace mlibc {
 		while (done < count) {
 			VfsHandleWriteMsgData req {};
 			VfsHandleWriteReplyMsgData reply {};
-			req.handle = fdTable[fd].handle;
+			req.handle = file.handle;
 			req.length = static_cast<uint32_t>(std::min<size_t>(VFS_MAX_READ_SIZE, count - done));
 			memcpy(req.data, static_cast<const char *>(buff) + done, req.length);
 
@@ -1822,15 +1913,15 @@ namespace mlibc {
 			return ESPIPE;
 		}
 
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
 		VfsHandleSeekMsgData req {};
 		VfsHandleSeekReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
+		req.handle = file.handle;
 		req.offset = offset;
 		req.whence = whence;
 
@@ -1856,22 +1947,26 @@ namespace mlibc {
 			return 0;
 		}
 
-		FdTableGuard guard;
-
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
-			return EBADF;
-		}
-
+		bool closeBackend = false;
 		VfsCloseMsgData req {};
-		VfsCloseReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
-		const bool closeBackend = !backendHandleHasOtherFd(fd);
-		fdTable[fd] = HorizonFd();
+
+		{
+			FdTableGuard guard;
+
+			if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+				return EBADF;
+			}
+
+			req.handle = fdTable[fd].handle;
+			closeBackend = !backendHandleHasOtherFd(fd);
+			fdTable[fd] = HorizonFd();
+		}
 
 		if (!closeBackend) {
 			return 0;
 		}
 
+		VfsCloseReplyMsgData reply {};
 		const int err = sendVfsRequest(VFS_CLOSE_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 
 		if (err != 0) {
@@ -1915,16 +2010,16 @@ namespace mlibc {
 		constexpr int HOS_LOCK_EX = 2;
 		constexpr int HOS_LOCK_UN = 8;
 
-		FdTableGuard guard;
+		HorizonFd file {};
 
-		if (fd < 0 or fd >= maxHorizonFds or !fdTable[fd].used) {
+		if (!fdSnapshot(fd, file)) {
 			return EBADF;
 		}
 
 		if ((options & HOS_LOCK_UN) != 0) {
 			VfsUnlockMsgData req {};
 			VfsUnlockReplyMsgData reply {};
-			req.handle = fdTable[fd].handle;
+			req.handle = file.handle;
 
 			const int err = sendVfsRequest(VFS_UNLOCK_MSG_TYPE, &req, sizeof(req), &reply, sizeof(reply));
 
@@ -1937,7 +2032,7 @@ namespace mlibc {
 
 		VfsLockMsgData req {};
 		VfsLockReplyMsgData reply {};
-		req.handle = fdTable[fd].handle;
+		req.handle = file.handle;
 		req.mode = (options & HOS_LOCK_EX) != 0 ? VFS_LOCK_EXCLUSIVE : VFS_LOCK_SHARED;
 
 		if ((options & (HOS_LOCK_SH | HOS_LOCK_EX)) == 0) {

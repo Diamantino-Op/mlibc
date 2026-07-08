@@ -51,6 +51,8 @@ constexpr uint64_t NAME_REGISTRY_PORT = 1;
 constexpr uint64_t VFS_CLIENT_PORT_BASE = 0xffff000000000000ULL;
 
 constexpr uint64_t VFS_STAT_MSG_TYPE = 0x90000;
+constexpr uint64_t VFS_READ_MSG_TYPE = 0x90004;
+constexpr uint64_t VFS_WRITE_MSG_TYPE = 0x90006;
 constexpr uint64_t VFS_OPEN_MSG_TYPE = 0x9000A;
 constexpr uint64_t VFS_CLOSE_MSG_TYPE = 0x9000C;
 constexpr uint64_t VFS_HANDLE_READ_MSG_TYPE = 0x9000E;
@@ -113,6 +115,10 @@ struct VfsDirEntry {
 struct VfsStatMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
 struct VfsStatReplyMsgData { bool success {}; uint8_t nodeType {}; uint64_t size {}; uint64_t nodeId {}; uint32_t status {}; };
 struct VfsReadDirReplyMsgData { bool success {}; uint32_t entryCount {}; VfsDirEntry entries[VFS_MAX_DIR_ENTRIES] {}; uint32_t nextOffset {}; bool hasMore {}; uint32_t status {}; };
+struct VfsReadMsgData { uint64_t offset {}; uint32_t length {}; char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+struct VfsReadReplyMsgData { bool success {}; uint32_t bytesRead {}; uint8_t data[VFS_MAX_READ_SIZE] {}; };
+struct VfsWriteMsgData { uint64_t offset {}; uint32_t length {}; uint8_t data[VFS_MAX_READ_SIZE] {}; char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; };
+struct VfsWriteReplyMsgData { bool success {}; uint32_t bytesWritten {}; uint64_t size {}; uint32_t status {}; };
 struct VfsOpenMsgData { char path[VFS_MAX_PATH_LENGTH] {}; size_t pathLength {}; uint32_t flags {}; };
 struct VfsOpenReplyMsgData { bool success {}; uint64_t handle {}; uint8_t nodeType {}; uint64_t size {}; uint32_t status {}; uint64_t nodeId {}; };
 struct VfsCloseMsgData { uint64_t handle {}; };
