@@ -37,6 +37,39 @@ int freePhysPage(uint64_t physPage);
 int registerKernelEventHandler(uint64_t port, uint64_t eventMask);
 int sendVfsRequest(uint64_t requestType, const void *request, size_t requestLength, void *reply, size_t replyLength);
 
+struct HorizonFramebufferInfo {
+	uint64_t physicalAddress;
+	uint64_t length;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pitch;
+	uint16_t bpp;
+	uint8_t redMaskSize;
+	uint8_t redMaskShift;
+	uint8_t greenMaskSize;
+	uint8_t greenMaskShift;
+	uint8_t blueMaskSize;
+	uint8_t blueMaskShift;
+};
+
+enum HorizonLogType {
+	HORIZON_LOG_DEBUG = 0,
+	HORIZON_LOG_INFO = 1,
+	HORIZON_LOG_WARN = 2,
+	HORIZON_LOG_ERROR = 3
+};
+
+struct HorizonKernelLogEntry {
+	uint64_t sequence;
+	uint64_t timestampNs;
+	uint32_t type;
+	char id[64];
+	char msg[256];
+};
+
+int getFramebufferInfo(HorizonFramebufferInfo *info, uint64_t framebufferIndex = 0);
+int readKernelLog(uint64_t afterSequence, HorizonKernelLogEntry *entries, uint64_t maxEntries, uint64_t *entriesRead);
+
 #ifdef __cplusplus
 }
 #endif

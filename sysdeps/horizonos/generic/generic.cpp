@@ -102,6 +102,21 @@ int registerKernelEventHandler(uint64_t port, uint64_t eventMask) {
 	return syscall(SYSCALL_REGISTER_EVENT_HANDLER, nullptr, port, eventMask);
 }
 
+int getFramebufferInfo(HorizonFramebufferInfo *info, uint64_t framebufferIndex) {
+	return syscall(SYSCALL_GET_FRAMEBUFFER_INFO, nullptr, reinterpret_cast<uint64_t>(info), framebufferIndex);
+}
+
+int readKernelLog(uint64_t afterSequence, HorizonKernelLogEntry *entries, uint64_t maxEntries, uint64_t *entriesRead) {
+	long ret = 0;
+	const int err = syscall(SYSCALL_READ_KERNEL_LOG, &ret, afterSequence, reinterpret_cast<uint64_t>(entries), maxEntries);
+
+	if (entriesRead != nullptr) {
+		*entriesRead = static_cast<uint64_t>(ret);
+	}
+
+	return err;
+}
+
 namespace {
 	constexpr size_t VFS_CLIENT_PORT_CACHE_SIZE = 128;
 

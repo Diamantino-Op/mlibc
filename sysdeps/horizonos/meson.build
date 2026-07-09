@@ -88,6 +88,8 @@ if not no_headers
         install_headers(
                 'include/horizonos/syscall.h',
                 'include/horizonos/archctl.h',
+                'include/horizonos/display.h',
+                'include/horizonos/window.h',
 				'generic/generic.h',
                 subdir: 'horizonos',
                 follow_symlinks: true,
