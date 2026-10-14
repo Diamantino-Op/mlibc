@@ -157,6 +157,10 @@ int main() {
 	assert(!strcmp(buf, "0XC"));
 	sprintf(buf, "%#o", 12);
 	assert(!strcmp(buf, "014"));
+	sprintf(buf, "%#.2o", 12);
+	assert(!strcmp(buf, "014"));
+	sprintf(buf, "%#.3o", 12);
+	assert(!strcmp(buf, "014"));
 
 	sprintf(buf, "%#x", 0);
 	assert(!strcmp(buf, "0"));
@@ -164,6 +168,28 @@ int main() {
 	assert(!strcmp(buf, "0"));
 	sprintf(buf, "%#o", 0);
 	assert(!strcmp(buf, "0"));
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+	sprintf(buf, "%#d", 42);
+	assert(!strcmp(buf, "42"));
+	sprintf(buf, "%#i", 42);
+	assert(!strcmp(buf, "42"));
+	sprintf(buf, "%#u", 42u);
+	assert(!strcmp(buf, "42"));
+	sprintf(buf, "%#hi", 0xdead);
+	assert(!strcmp(buf, "-8531"));
+	sprintf(buf, "%#+ 9hhi", 0x7);
+	assert(!strcmp(buf, "       +7"));
+	sprintf(buf, "%# 9hhd", 0x6);
+	assert(!strcmp(buf, "        6"));
+	sprintf(buf, "%#06hhi", 0x95);
+	assert(!strcmp(buf, "-00107"));
+	sprintf(buf, "%# hhd", 0x4);
+	assert(!strcmp(buf, " 4"));
+	sprintf(buf, "%# hhu", 0x3);
+	assert(!strcmp(buf, "3"));
+#pragma GCC diagnostic pop
 
 	sprintf(buf, "%#.a", -42.0);
 	assert(!strcmp(buf, "-0x1.p+5"));
@@ -229,6 +255,11 @@ int main() {
 	sprintf(buf, "%hhx", (unsigned char) 12);
 	assert(!strcmp(buf, "c"));
 
+	sprintf(buf, "%#x", 12);
+	assert(!strcmp(buf, "0xc"));
+	sprintf(buf, "%#x", 0);
+	assert(!strcmp(buf, "0"));
+
 	// Test 'X' with different size mods to see
 	// if they work
 	sprintf(buf, "%X", 12);
@@ -258,6 +289,10 @@ int main() {
 	assert(!strcmp(buf, "14"));
 	sprintf(buf, "%hho", (unsigned char) 12);
 	assert(!strcmp(buf, "14"));
+	sprintf(buf, "%.2o", 12);
+	assert(!strcmp(buf, "14"));
+	sprintf(buf, "%.3o", 12);
+	assert(!strcmp(buf, "014"));
 
 	// Disable -Wformat here because the compiler might not know about the b specifier.
 #pragma GCC diagnostic push
@@ -276,6 +311,39 @@ int main() {
 	assert(!strcmp(buf, "1100"));
 	sprintf(buf, "%hhb", (unsigned char) 12);
 	assert(!strcmp(buf, "1100"));
+#pragma GCC diagnostic pop
+
+	// Test whether '+' and ' ' flags are ignored where they are UB.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+	sprintf(buf, "% x", 128);
+	assert(!strcmp(buf, "80"));
+	sprintf(buf, "%+x", 128);
+	assert(!strcmp(buf, "80"));
+	sprintf(buf, "% X", 128);
+	assert(!strcmp(buf, "80"));
+	sprintf(buf, "% u", 128u);
+	assert(!strcmp(buf, "128"));
+	sprintf(buf, "%+u", 128u);
+	assert(!strcmp(buf, "128"));
+	sprintf(buf, "% o", 8u);
+	assert(!strcmp(buf, "10"));
+	sprintf(buf, "%+o", 8u);
+	assert(!strcmp(buf, "10"));
+	sprintf(buf, "% b", 5u);
+	assert(!strcmp(buf, "101"));
+	sprintf(buf, "%+b", 5u);
+	assert(!strcmp(buf, "101"));
+	sprintf(buf, "% 5x", 128);
+	assert(!strcmp(buf, "   80"));
+	sprintf(buf, "%+5u", 128u);
+	assert(!strcmp(buf, "  128"));
+	sprintf(buf, "% 05x", 128);
+	assert(!strcmp(buf, "00080"));
+	sprintf(buf, "% .0x", 0);
+	assert(!strcmp(buf, ""));
+	sprintf(buf, "%+.0u", 0u);
+	assert(!strcmp(buf, ""));
 #pragma GCC diagnostic pop
 
 	// Test %n$ syntax.
@@ -361,6 +429,36 @@ int main() {
 	assert(!strcmp(buf, "1.234e-04"));
 	sprintf(buf, "%.3E", -0.00012345);
 	assert(!strcmp(buf, "-1.234E-04"));
+
+	#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+	sprintf(buf, "%15.4E", 1234.5678);
+	assert(!strcmp(buf, "     1.2346E+03"));
+
+	sprintf(buf, "%12.3e", 6.6667e-05);
+	assert(!strcmp(buf, "   6.667e-05"));
+	sprintf(buf, "%12.5G", 6.6667e-05);
+	assert(!strcmp(buf, "  6.6667E-05"));
+	sprintf(buf, "%12.4e", -6.6667e-05);
+	assert(!strcmp(buf, " -6.6667e-05"));
+	sprintf(buf, "%012.3e", 6.6667e-05);
+	assert(!strcmp(buf, "0006.667e-05"));
+	sprintf(buf, "%12.2e", 0.0);
+	assert(!strcmp(buf, "    0.00e+00"));
+	sprintf(buf, "%20.6E", 1.5e-300);
+	assert(!strcmp(buf, "       1.500000E-300"));
+	sprintf(buf, "%20.6e", 1.5e300);
+	assert(!strcmp(buf, "       1.500000e+300"));
+
+	sprintf(buf, "%-15.4e", 1234.5678);
+	assert(!strcmp(buf, "1.2346e+03     "));
+	sprintf(buf, "%-12.3e", 6.6667e-05);
+	assert(!strcmp(buf, "6.667e-05   "));
+	sprintf(buf, "%-20.6E", 1.5e-300);
+	assert(!strcmp(buf, "1.500000E-300       "));
+
+	fprintf(stderr, "'%s'\n", buf);
+#pragma GCC diagnostic pop
 
 	// Test %g/%G behavior
 	sprintf(buf, "%g", 123456.0); // Should not use e-notation
@@ -457,6 +555,17 @@ int main() {
 
 	sprintf(buf, "%'10g", 1337.69);
 	assert(!strcmp(buf, "  1,337.69"));
+
+	snprintf(buf, 128, "%.2ls", L"test");
+	assert(!strcmp(buf, "te"));
+
+	ret = setlocale(LC_ALL, "C.UTF-8");
+	assert(ret && *ret);
+
+	sprintf(buf, "%.2ls", L"✨⛔");
+	assert(!strcmp(buf, ""));
+	snprintf(buf, 128, "%.3ls", L"✨⛔");
+	assert(!strcmp(buf, "✨"));
 
 	return 0;
 }

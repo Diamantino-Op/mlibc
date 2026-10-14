@@ -14,7 +14,7 @@
 
 template<bool Recursive>
 struct alignas(4) FutexLockImpl {
-	FutexLockImpl() : _state{0}, _recursion{0} { }
+	constexpr FutexLockImpl() : _state{0}, _recursion{0} { }
 
 	FutexLockImpl(const FutexLockImpl &) = delete;
 
@@ -87,7 +87,7 @@ struct alignas(4) FutexLockImpl {
 			// If this (recursive) mutex is already owned by us, increment the recursion level.
 			if((expected & ownerMask) == this_tid) {
 				if constexpr (Recursive) {
-					__ensure(!_recursion);
+					__ensure(_recursion);
 					++_recursion;
 					return true;
 				} else {
@@ -117,6 +117,26 @@ struct alignas(4) FutexLockImpl {
 			int e = mlibc::sysdep<FutexWake>((int *)&_state, true);
 			__ensure(e >= 0 || e == EACCES || e == EINVAL);
 		}
+	}
+
+	// Only valid in the single-threaded child immediately after fork().
+	void reset_after_fork() {
+		_recursion = 0;
+		__atomic_store_n(&_state, 0, __ATOMIC_RELAXED);
+	}
+
+	// Only valid in the single-threaded child immediately after fork().
+	// Preserve ownership if the surviving thread held this lock before fork().
+	void rebind_after_fork(unsigned int parent_tid) {
+		auto state = __atomic_load_n(&_state, __ATOMIC_RELAXED);
+		if((state & ownerMask) != parent_tid) {
+			reset_after_fork();
+			return;
+		}
+
+		if constexpr (Recursive)
+			__ensure(_recursion);
+		__atomic_store_n(&_state, mlibc::this_tid(), __ATOMIC_RELAXED);
 	}
 private:
 	uint32_t _state;

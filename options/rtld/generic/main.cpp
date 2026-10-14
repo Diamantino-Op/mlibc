@@ -3,6 +3,7 @@
 #include <link.h>
 
 #include <frg/manual_box.hpp>
+#include <frg/mutex.hpp>
 #include <frg/small_vector.hpp>
 #include <frg/optional.hpp>
 #include <frg/string.hpp>
@@ -53,11 +54,22 @@ frg::manual_box<Scope> globalScope;
 
 frg::manual_box<RuntimeTlsMap> runtimeTlsMap;
 frg::manual_box<FutexLock> runtimeTlsMapLock;
+// Serializes all access to the repository, scopes, and object lifecycle state.
+constinit RecursiveFutexLock loaderLock;
+
+struct DlError {
+	frg::string<LdsoAllocator> message;
+	frg::string<LdsoAllocator> pendingMessage;
+	bool pending;
+};
+
+using DlErrorMap = frg::hash_map<Tcb *, DlError, frg::hash<Tcb *>, LdsoAllocator>;
+frg::manual_box<DlErrorMap> dlErrors;
 
 // We use a small vector to avoid memory allocation for the default library paths
-frg::manual_box<frg::small_vector<frg::string_view, MLIBC_NUM_DEFAULT_LIBRARY_PATHS, MemoryAllocator>> libraryPaths;
+frg::manual_box<frg::small_vector<frg::string_view, MLIBC_NUM_DEFAULT_LIBRARY_PATHS, LdsoAllocator>> libraryPaths;
 
-frg::manual_box<frg::vector<frg::string_view, MemoryAllocator>> preloads;
+frg::manual_box<frg::vector<frg::string_view, LdsoAllocator>> preloads;
 
 static SharedObject *executableSO;
 static uintptr_t vdsoBase = 0;
@@ -65,6 +77,9 @@ extern HIDDEN char __ehdr_start[];
 
 // Global debug interface variable
 DebugInterface globalDebugInterface;
+
+extern "C" [[gnu::weak, gnu::visibility("hidden")]]
+void __mlibc_sysdep_rtld_postfork() { }
 
 #ifndef MLIBC_STATIC_BUILD
 
@@ -117,7 +132,7 @@ extern "C" void relocateSelf() {
 		if(ELF_R_SYM(reloc->r_info))
 			__builtin_trap();
 
-		auto p = reinterpret_cast<uint64_t *>(ldso_base + reloc->r_offset);
+		auto p = reinterpret_cast<uintptr_t *>(ldso_base + reloc->r_offset);
 		switch(type) {
 		case R_RELATIVE:
 			*p = ldso_base + reloc->r_addend;
@@ -134,7 +149,7 @@ extern "C" void relocateSelf() {
 		if(ELF_R_SYM(reloc->r_info))
 			__builtin_trap();
 
-		auto p = reinterpret_cast<uint64_t *>(ldso_base + reloc->r_offset);
+		auto p = reinterpret_cast<uintptr_t *>(ldso_base + reloc->r_offset);
 		switch(type) {
 		case R_RELATIVE:
 			*p += ldso_base;
@@ -206,29 +221,8 @@ extern "C" void relocateSelf68k(elf_dyn *dynamic, uintptr_t ldso_base) {
 #endif // !defined(__m68k__)
 #endif
 
-extern "C" void *lazyRelocate(SharedObject *object, unsigned int rel_index) {
-	__ensure(object->lazyExplicitAddend);
-	auto reloc = (elf_rela *)(object->baseAddress + object->lazyRelocTableOffset
-			+ rel_index * sizeof(elf_rela));
-	auto type = ELF_R_TYPE(reloc->r_info);
-	auto symbol_index = ELF_R_SYM(reloc->r_info);
-
-	__ensure(type == R_X86_64_JUMP_SLOT);
-	__ensure(ELF_CLASS == ELFCLASS64);
-
-	auto [sym, ver] = object->getSymbolByIndex(symbol_index);
-	auto p = Scope::resolveGlobalOrLocal(*globalScope, object->localScope, sym.getString(), object->objectRts, 0, ver);
-	if(!p)
-		mlibc::panicLogger() << "Unresolved JUMP_SLOT symbol" << frg::endlog;
-
-	//mlibc::infoLogger() << "Lazy relocation to " << symbol_str
-	//		<< " resolved to " << pointer << frg::endlog;
-
-	*(uint64_t *)(object->baseAddress + reloc->r_offset) = p->virtualAddress();
-	return (void *)p->virtualAddress();
-}
-
 extern "C" [[ gnu::visibility("default") ]] void *__rtld_allocateTcb() {
+	frg::unique_lock lock{loaderLock};
 	auto tcb = allocateTcb();
 	initTlsObjects(tcb, globalScope->_objects, false);
 	return tcb;
@@ -250,8 +244,8 @@ extern "C" [[gnu::alias("dl_debug_state"), gnu::visibility("default")]] void _dl
 
 namespace {
 
-frg::vector<frg::string_view, MemoryAllocator> parseList(frg::string_view paths, frg::string_view separators) {
-	frg::vector<frg::string_view, MemoryAllocator> list{getAllocator()};
+frg::vector<frg::string_view, LdsoAllocator> parseList(frg::string_view paths, frg::string_view separators) {
+	frg::vector<frg::string_view, LdsoAllocator> list{getLdsoAllocator()};
 
 	size_t p = 0;
 	while(p < paths.size()) {
@@ -333,7 +327,7 @@ void setupVdso(uintptr_t vdsoBase) {
 	}
 
 	auto vdso = initialRepository->injectObjectFromDts(vdso_soname,
-		frg::string<MemoryAllocator> { getAllocator() }, actual_base, vdso_dynamic, 1);
+		frg::string<LdsoAllocator> { getLdsoAllocator() }, actual_base, vdso_dynamic, 1);
 	vdso->phdrPointer = vdso_phdrs;
 	vdso->phdrCount = vdso_header->e_phnum;
 	vdso->phdrEntrySize = vdso_header->e_phentsize;
@@ -361,8 +355,9 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 
 	runtimeTlsMapLock.initialize();
 	runtimeTlsMap.initialize();
-	libraryPaths.initialize(getAllocator());
-	preloads.initialize(getAllocator());
+	libraryPaths.initialize(getLdsoAllocator());
+	preloads.initialize(getLdsoAllocator());
+	dlErrors.initialize(frg::hash<Tcb *>{}, getLdsoAllocator());
 
 	void *phdr_pointer = nullptr;
 	size_t phdr_entry_size = 0;
@@ -577,13 +572,6 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 		libraryPaths->push_back(path);
 	}
 
-// This is here because libgcc will add a global constructor on glibc Linux
-// (which is what it believes we are due to the aarch64-linux-gnu toolchain)
-// in order to check if LSE atomics are supported.
-//
-// This is not necessary on a custom Linux toolchain and is purely an artifact of
-// using the host toolchain.
-#if defined(__aarch64__) && defined(__gnu_linux__)
 	for (size_t i = 0; i < num_ldso_ctors; i++) {
 		if(rtldConfig.debug)
 			mlibc::infoLogger() << "ldso: Running own constructor at "
@@ -591,13 +579,6 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 					<< frg::endlog;
 		ldso_ctors[i]();
 	}
-#else
-	if (num_ldso_ctors > 0) {
-		mlibc::panicLogger() << "ldso: Found unexpected own global constructor(s), init_array starts at: "
-				<< ldso_ctors
-				<< frg::endlog;
-	}
-#endif
 
 #else
 	(void)env_ld_library_path;
@@ -627,11 +608,11 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 	// We inject the executable first such that it is the first entry in dl_iterate_phdr.
 #ifndef MLIBC_STATIC_BUILD
 	executableSO = initialRepository->injectObjectFromPhdrs(execfn,
-		frg::string<MemoryAllocator> { execfn, getAllocator() },
+		frg::string<LdsoAllocator> { execfn, getLdsoAllocator() },
 		phdr_pointer, phdr_entry_size, phdr_count, entry_pointer, 1);
 #else
 	executableSO = initialRepository->injectStaticObject(execfn,
-			frg::string<MemoryAllocator>{ execfn, getAllocator() },
+			frg::string<LdsoAllocator>{ execfn, getLdsoAllocator() },
 			phdr_pointer, phdr_entry_size, phdr_count, entry_pointer, 1);
 	globalDebugInterface.base = (void*)executableSO->baseAddress;
 #endif
@@ -639,7 +620,7 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 #ifndef MLIBC_STATIC_BUILD
 	auto ldso_soname = reinterpret_cast<const char *>(ldso_base + strtab_offset + soname_str);
 	auto ldso = initialRepository->injectObjectFromDts(ldso_soname,
-		frg::string<MemoryAllocator> { getAllocator() },
+		frg::string<LdsoAllocator> { getLdsoAllocator() },
 		ldso_base, _DYNAMIC, 1);
 
 	auto ldso_ehdr = reinterpret_cast<elf_ehdr *>(__ehdr_start);
@@ -648,6 +629,8 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 	ldso->phdrPointer = ldso_phdr;
 	ldso->phdrCount = ldso_ehdr->e_phnum;
 	ldso->phdrEntrySize = ldso_ehdr->e_phentsize;
+	ldso->skipRelocation = true;
+	ldso->skipInit = true;
 
 	// We can't initialise the ldso object after the executable SO,
 	// so we have to set the ldso path after loading both.
@@ -686,7 +669,38 @@ extern "C" void *interpreterMain(uintptr_t *entry_stack) {
 	return executableSO->entry;
 }
 
-const char *lastError;
+void setDlError(frg::string<LdsoAllocator> error) {
+	auto tcb = mlibc::get_current_tcb();
+	if(auto entry = dlErrors->get(tcb)) {
+		entry->pendingMessage = std::move(error);
+		entry->pending = true;
+	} else {
+		dlErrors->insert(tcb, DlError{
+			frg::string<LdsoAllocator>{getLdsoAllocator()}, std::move(error), true
+		});
+	}
+}
+
+void setDlError(const char *file, const char *error) {
+	auto message = frg::string<LdsoAllocator>{file, getLdsoAllocator()} + ": ";
+	message += error;
+	setDlError(std::move(message));
+}
+
+extern "C" [[ gnu::visibility("default") ]] void __dlapi_prefork() {
+	loaderLock.lock();
+}
+
+extern "C" [[ gnu::visibility("default") ]] void __dlapi_postfork_finish() {
+	loaderLock.unlock();
+}
+
+extern "C" [[ gnu::visibility("default") ]] void __dlapi_postfork_rebind(unsigned int parent_tid) {
+	loaderLock.rebind_after_fork(parent_tid);
+	if(runtimeTlsMapLock.valid())
+		runtimeTlsMapLock->reset_after_fork();
+	__mlibc_sysdep_rtld_postfork();
+}
 
 extern "C" [[ gnu::visibility("default") ]] uintptr_t *__dlapi_entrystack() {
 	return entryStack;
@@ -694,14 +708,18 @@ extern "C" [[ gnu::visibility("default") ]] uintptr_t *__dlapi_entrystack() {
 
 extern "C" [[ gnu::visibility("default") ]]
 const char *__dlapi_error() {
-	auto error = lastError;
-	lastError = nullptr;
-	return error;
+	frg::unique_lock lock{loaderLock};
+	auto entry = dlErrors->get(mlibc::get_current_tcb());
+	if(!entry || !entry->pending)
+		return nullptr;
+	entry->message = std::move(entry->pendingMessage);
+	entry->pending = false;
+	return entry->message.data();
 }
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_get_tls(struct __abi_tls_entry *entry) {
-	return reinterpret_cast<char *>(accessDtv(entry->object)) + entry->offset;
+	return reinterpret_cast<char *>(accessDtvIndex(entry->index)) + entry->offset;
 }
 
 extern "C" [[ gnu::visibility("default") ]]
@@ -710,6 +728,7 @@ const mlibc::RtldConfig &__dlapi_get_config() {
 }
 
 extern "C" [[ gnu::visibility("default") ]] void __dlapi_exit() {
+	frg::unique_lock lock{loaderLock};
 	initialRepository->destructObjects();
 }
 
@@ -717,6 +736,7 @@ extern "C" [[ gnu::visibility("default") ]] void __dlapi_exit() {
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_open(const char *file, int flags, void *returnAddress) {
+	frg::unique_lock lock{loaderLock};
 	if (rtldConfig.debug)
 		mlibc::infoLogger() << "rtld: __dlapi_open(" << (file ? file : "nullptr") << ")" << frg::endlog;
 
@@ -726,10 +746,14 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 	if(!file)
 		return executableSO;
 
-	// TODO: Thread-safety!
 	auto rts = rtsCounter++;
 
-	SharedObject *object = initialRepository->findLoadedObject(file);
+	auto objectName = frg::string_view{file};
+	auto lastSlash = objectName.find_last('/');
+	if (lastSlash != static_cast<size_t>(-1))
+		objectName = objectName.sub_string(lastSlash + 1, objectName.size() - (lastSlash + 1));
+
+	SharedObject *object = initialRepository->findLoadedObject(objectName);
 	if (object && object->globalRts == 0 && (flags & RTLD_GLOBAL)) {
 		// The object was opened with RTLD_LOCAL, but we are called with RTLD_GLOBAL.
 		// According to the man page, we should promote to the global scope here.
@@ -758,22 +782,22 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 			case LinkerError::success:
 				__builtin_unreachable();
 			case LinkerError::notFound:
-				lastError = "Cannot locate requested DSO";
+				setDlError(file, "Cannot locate requested DSO");
 				break;
 			case LinkerError::fileTooShort:
-				lastError = "File too short";
+				setDlError(file, "File too short");
 				break;
 			case LinkerError::notElf:
-				lastError = "File is not an ELF file";
+				setDlError(file, "File is not an ELF file");
 				break;
 			case LinkerError::wrongElfType:
-				lastError = "File has wrong ELF type";
+				setDlError(file, "File has wrong ELF type");
 				break;
 			case LinkerError::outOfMemory:
-				lastError = "Out of memory";
+				setDlError(file, "Out of memory");
 				break;
 			case LinkerError::invalidProgramHeader:
-				lastError = "File has invalid program header";
+				setDlError(file, "File has invalid program header");
 				break;
 			}
 			return nullptr;
@@ -801,6 +825,7 @@ void *__dlapi_open(const char *file, int flags, void *returnAddress) {
 
 extern "C" [[ gnu::visibility("default") ]]
 void *__dlapi_resolve(void *handle, const char *string, void *returnAddress, const char *version) {
+	frg::unique_lock lock{loaderLock};
 	if (rtldConfig.debug) {
 		const char *name;
 		bool quote = false;
@@ -856,13 +881,13 @@ void *__dlapi_resolve(void *handle, const char *string, void *returnAddress, con
 		// than just the dependencies of the DSO, if the DSO was loaded as a dependency
 		// of a dlopen()ed DSO).
 
-		frg::vector<SharedObject *, MemoryAllocator> queue{getAllocator()};
+		frg::vector<SharedObject *, LdsoAllocator> queue{getLdsoAllocator()};
 
 		struct Token { };
 		frg::hash_map<
 				SharedObject *, Token,
-				frg::hash<SharedObject *>, MemoryAllocator
-		> visited{frg::hash<SharedObject *>{}, getAllocator()};
+				frg::hash<SharedObject *>, LdsoAllocator
+		> visited{frg::hash<SharedObject *>{}, getLdsoAllocator()};
 
 		auto root = reinterpret_cast<SharedObject *>(handle);
 		visited.insert(root, Token{});
@@ -888,7 +913,7 @@ void *__dlapi_resolve(void *handle, const char *string, void *returnAddress, con
 		if (rtldConfig.debug)
 			mlibc::infoLogger() << "rtld: could not resolve \"" << string << "\"" << frg::endlog;
 
-		lastError = "Cannot resolve requested symbol";
+		setDlError(frg::string<LdsoAllocator>{"Cannot resolve requested symbol", getLdsoAllocator()});
 		return nullptr;
 	}
 	return reinterpret_cast<void *>(target->virtualAddress());
@@ -967,6 +992,7 @@ void *__dlapi_vdsosym(const char *string, const char *version) {
 
 extern "C" [[ gnu::visibility("default") ]]
 int __dlapi_reverse(const void *ptr, __dlapi_symbol *info) {
+	frg::unique_lock lock{loaderLock};
 	if (rtldConfig.debug)
 		mlibc::infoLogger() << "rtld: __dlapi_reverse(" << ptr << ")" << frg::endlog;
 
@@ -1067,6 +1093,7 @@ int __dlapi_reverse(const void *ptr, __dlapi_symbol *info) {
 
 extern "C" [[ gnu::visibility("default") ]]
 int __dlapi_close(void *) {
+	frg::unique_lock lock{loaderLock};
 	if (rtldConfig.debug)
 		mlibc::infoLogger() << "mlibc: dlclose() is a no-op" << frg::endlog;
 	return 0;
@@ -1076,8 +1103,11 @@ int __dlapi_close(void *) {
 
 extern "C" [[ gnu::visibility("default") ]]
 int __dlapi_iterate_phdr(int (*callback)(struct dl_phdr_info *, size_t, void*), void *data) {
+	frg::unique_lock lock{loaderLock};
 	int last_return = 0;
-	for (auto object : initialRepository->loadedObjects) {
+	auto numObjects = initialRepository->loadedObjects.size();
+	for (size_t i = 0; i < numObjects; i++) {
+		auto object = initialRepository->loadedObjects[i];
 		struct dl_phdr_info info;
 		info.dlpi_addr = object->baseAddress;
 
@@ -1092,10 +1122,7 @@ int __dlapi_iterate_phdr(int (*callback)(struct dl_phdr_info *, size_t, void*), 
 		info.dlpi_phnum = object->phdrCount;
 		info.dlpi_adds = rtsCounter;
 		info.dlpi_subs = 0; // TODO(geert): implement dlclose().
-		if (object->tlsModel != TlsModel::null)
-			info.dlpi_tls_modid = object->tlsIndex;
-		else
-			info.dlpi_tls_modid = 0;
+		info.dlpi_tls_modid = object->tlsIndex;
 		info.dlpi_tls_data = tryAccessDtv(object);
 
 		last_return = callback(&info, sizeof(struct dl_phdr_info), data);
@@ -1118,6 +1145,7 @@ void __dlapi_enter(uintptr_t *entry_stack) {
 #if __MLIBC_GLIBC_OPTION
 
 extern "C" [[gnu::visibility("default")]] int __dlapi_find_object(void *address, dl_find_object *result) {
+	frg::unique_lock lock{loaderLock};
 	for (const SharedObject *object : initialRepository->loadedObjects) {
 		bool found_address = false;
 		uintptr_t map_start = UINTPTR_MAX;

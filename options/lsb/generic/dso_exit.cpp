@@ -4,6 +4,7 @@
 
 #include <bits/ensure.h>
 #include <mlibc/allocator.hpp>
+#include <mlibc/file-io.hpp>
 
 #include <frg/eternal.hpp>
 #include <frg/vector.hpp>
@@ -16,11 +17,15 @@ struct ExitHandler {
 
 using ExitQueue = frg::vector<ExitHandler, MemoryAllocator>;
 
+struct ExitQueueWrapper {
+	ExitQueueWrapper() : queue{getAllocator()} {}
+	ExitQueue queue;
+};
+
+constinit mlibc::lazy_eternal<ExitQueueWrapper> global_exit_queue;
+
 ExitQueue &getExitQueue() {
-	// use frg::eternal to prevent the compiler from scheduling the destructor
-	// by generating a call to __cxa_atexit().
-	static frg::eternal<ExitQueue> singleton(getAllocator());
-	return singleton.get();
+	return global_exit_queue.get().queue;
 }
 
 extern "C" int __cxa_atexit(void (*function)(void *), void *argument, void *handle) {
@@ -64,6 +69,7 @@ extern "C" void *__dso_handle;
 }
 
 void __mlibc_do_finalize() {
+	mlibc::run_thread_local_destructors();
 	// Invoke any handlers registered with atexit (NOT associated with a DSO).
 	// Note that we deliberately do not invoke other handlers here, since
 	// that would destroy mlibc's global objects including stdout and flushing
@@ -85,4 +91,8 @@ void __mlibc_do_finalize() {
 	// to implement [[gnu::destructor]]. Note that C++ applications will call
 	// __cxa_finalize from here.
 	__dlapi_exit();
+
+	// The standard streams outlive __cxa_finalize(), so flush them here, once
+	// everything that could still write to them has run.
+	mlibc::flush_all_files();
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mlibc/sysdep-signatures.hpp>
+#include <mlibc/sysdep-traits.hpp>
 
 namespace mlibc {
 
@@ -44,6 +45,8 @@ struct LinuxSysdepTags :
 	SetEuid,
 	SetGid,
 	SetEgid,
+	SetFsuid,
+	SetFsgid,
 	GetGroups,
 	Fexecve,
 	Pselect,
@@ -63,6 +66,7 @@ struct LinuxSysdepTags :
 	GetCwd,
 	Chdir,
 	Fchdir,
+	Chroot,
 	Mkdir,
 	Mkdirat,
 	Link,
@@ -165,7 +169,6 @@ struct LinuxSysdepTags :
 	Shmdt,
 	Shmget,
 	InetConfigured,
-	Nice,
 	Msgctl,
 	Msgget,
 	Msgrcv,
@@ -175,6 +178,14 @@ struct LinuxSysdepTags :
 	MqReceive,
 	MqGetAttr,
 	MqSetAttr,
+	AioRead,
+	AioWrite,
+	AioFsync,
+	AioListio,
+	AioSuspend,
+	AioCancel,
+	AioError,
+	AioReturn,
 #endif // __MLIBC_POSIX_OPTION
 
 #if __MLIBC_BSD_OPTION
@@ -221,6 +232,7 @@ struct LinuxSysdepTags :
 	Fstatfs,
 	Statx,
 	Getifaddrs,
+	Freeifaddrs,
 	Sendfile,
 	Syncfs,
 	Unshare,
@@ -236,6 +248,7 @@ struct LinuxSysdepTags :
 	MoveMount,
 	OpenTree,
 	CopyFileRange,
+	Renameat2,
 #endif // __MLIBC_LINUX_OPTION
 
 #if __MLIBC_LINUX_EPOLL_OPTION
@@ -282,10 +295,8 @@ struct LinuxSysdepTags :
 #endif
 	Exit,
 	ThreadExit,
-#if __MLIBC_POSIX_OPTION
 	PrepareStack,
 	Clone,
-#endif // __MLIBC_POSIX_OPTION
 	FutexWait,
 	FutexWake,
 	Open,
@@ -318,5 +329,9 @@ struct LinuxSysdepTags :
 
 template<typename Tag>
 using Sysdeps = SysdepOf<LinuxSysdepTags, Tag>;
+
+struct SysdepTraits {
+	static constexpr bool usesRtNetlink = true;
+};
 
 } // namespace mlibc

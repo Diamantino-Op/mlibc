@@ -16,6 +16,14 @@ rtld_test_cases = [
 	'scope5',
 	'search-order',
 	'tls_align',
+	'tls_modid',
+	'dlopen-tls-relocation',
+	'concurrent-dlopen',
+	'fork-dlopen',
+	'fork-from-constructor',
+	'iterate-reentrant',
+	'recursive-dlopen',
+	'thread-local-dlerror',
 	'relr',
 	'symver',
 	'fail-load',
@@ -23,7 +31,13 @@ rtld_test_cases = [
 	'no-dt_symbolic',
 ]
 
-if host_machine.cpu_family() != 'm68k'
+if host_machine.cpu_family() in ['x86', 'x86_64', 'aarch64']
+	rtld_test_cases += [
+		'tlsdesc',
+	]
+endif
+
+if ifuncs_supported and host_machine.cpu_family() != 'm68k'
 	rtld_test_cases += [
 		'ifunc',
 		'ifunc-dlopen',

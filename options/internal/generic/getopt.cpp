@@ -30,37 +30,42 @@ int getopt_common_internal(int argc, char * const argv[], const char *optstring,
 
 		frg::optional<size_t> i = frg::null_opt;
 
-		// first, attempt to find exactly one exact match
+		// First, attempt to find an exact match.
+		// Like glibc, take the first one even if a later entry has the same name;
+		// some programs in the wild rely on this (e.g., fio with a duplicate --size entry in longopts).
 		for(size_t longopt = 0; longopts[longopt].name; longopt++) {
 			if(strncmp(arg, longopts[longopt].name, n) || longopts[longopt].name[n])
 				continue;
 
-			if(i) {
-				if(opterr)
-					fprintf(stderr, "Multiple option declaration detected: %s\n", arg);
-				optind++;
-				return '?';
-			}
-
 			i = longopt;
+			break;
 		}
 
 		if(i)
 			return *i;
 
-		// because no exact match was found, we now search for longopts with partial matches
+		// Because no exact match was found, we now search for longopts with partial matches.
 		for(size_t longopt = 0; longopts[longopt].name; longopt++) {
 			if(strncmp(arg, longopts[longopt].name, n))
 				continue;
 
-			if(i) {
-				if(opterr)
-					fprintf(stderr, "Multiple option declaration detected: %s\n", arg);
-				optind++;
-				return '?';
+			if(!i) {
+				i = longopt;
+				continue;
 			}
 
-			i = longopt;
+			// Like glibc, do not consider a later match ambiguous if it is indistinguishable
+			// from the first one. glibc does not do this in getopt_long_only() mode.
+			if(mode != mlibc::GetoptMode::LongOnly
+					&& longopts[*i].has_arg == longopts[longopt].has_arg
+					&& longopts[*i].flag == longopts[longopt].flag
+					&& longopts[*i].val == longopts[longopt].val)
+				continue;
+
+			if(opterr)
+				fprintf(stderr, "Multiple option declaration detected: %s\n", arg);
+			optind++;
+			return '?';
 		}
 
 		if(i)
@@ -128,6 +133,7 @@ int getopt_common_internal(int argc, char * const argv[], const char *optstring,
 
 	bool colon = optstring[0] == ':';
 	bool stop_at_first_nonarg = (optstring[0] == '+' || getenv("POSIXLY_CORRECT"));
+	bool return_nonarg = optstring[0] == '-';
 
 	// if optstring contains "W;", then "-W foo" is treated as the long option "--foo".
 	bool w_long_options = [&]{
@@ -152,6 +158,12 @@ int getopt_common_internal(int argc, char * const argv[], const char *optstring,
 			if(!strcmp(arg, "--")) {
 				optind++;
 				return -1;
+			}
+
+			if(return_nonarg) {
+				optarg = arg;
+				optind++;
+				return '\001';
 			}
 
 			if(stop_at_first_nonarg) {

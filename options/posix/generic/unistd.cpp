@@ -21,6 +21,7 @@
 #include <mlibc/allocator.hpp>
 #include <mlibc/arch-defs.hpp>
 #include <mlibc/debug.hpp>
+#include <mlibc/dlapi.hpp>
 #include <mlibc/getopt.hpp>
 #include <mlibc/thread.hpp>
 #include <mlibc/utmp.hpp>
@@ -454,6 +455,8 @@ long gethostid(void) {
 	return errno = ENOSYS, -1;
 }
 
+static_assert(HOST_NAME_MAX >= _POSIX_HOST_NAME_MAX);
+
 int gethostname(char *buffer, size_t bufsize) {
 	if(auto e = mlibc::sysdep_or_enosys<GetHostname>(buffer, bufsize); e) {
 		errno = e;
@@ -601,11 +604,28 @@ int lockf(int fd, int op, off_t size) {
 
 int nice(int nice) {
 	int new_nice;
-	if(int e = mlibc::sysdep_or_enosys<Nice>(nice, &new_nice); e) {
+	if constexpr (mlibc::IsImplemented<Nice>) {
+		if(int e = mlibc::sysdep_or_enosys<Nice>(nice, &new_nice); e) {
+			errno = e;
+			return -1;
+		}
+		return new_nice;
+	}
+
+	// Like glibc, fall back to implementing nice() via the priority sysdeps.
+	int old_nice;
+	if(int e = mlibc::sysdep_or_enosys<GetPriority>(PRIO_PROCESS, 0, &old_nice); e) {
 		errno = e;
 		return -1;
 	}
-
+	if(int e = mlibc::sysdep_or_enosys<SetPriority>(PRIO_PROCESS, 0, old_nice + nice); e) {
+		errno = e;
+		return -1;
+	}
+	if(int e = mlibc::sysdep_or_enosys<GetPriority>(PRIO_PROCESS, 0, &new_nice); e) {
+		errno = e;
+		return -1;
+	}
 	return new_nice;
 }
 
@@ -984,7 +1004,6 @@ long sysconf(int number) {
 		case _SC_GETPW_R_SIZE_MAX:
 			return NSS_BUFLEN_PASSWD;
 		case _SC_GETGR_R_SIZE_MAX:
-			mlibc::infoLogger() << "\e[31mmlibc: sysconf(_SC_GETGR_R_SIZE_MAX) returns fallback value 1024\e[39m" << frg::endlog;
 			return 1024;
 		case _SC_CHILD_MAX:
 			mlibc::infoLogger() << "\e[31mmlibc: sysconf(_SC_CHILD_MAX) returns fallback value 25\e[39m" << frg::endlog;
@@ -1264,6 +1283,7 @@ int dup3(int oldfd, int newfd, int flags) {
 
 pid_t _Fork(void) {
 	auto self = mlibc::get_current_tcb();
+	auto parent_tid = self->tid;
 	pid_t child;
 	if (int e = mlibc::sysdep_or_enosys<Fork>(&child); e) {
 		errno = e;
@@ -1273,12 +1293,15 @@ pid_t _Fork(void) {
 	// update the cached TID in the TCB
 	if (!child)
 		__atomic_store_n(&self->tid, mlibc::refetch_tid(), __ATOMIC_RELAXED);
+	if (!child)
+		__dlapi_postfork_rebind(parent_tid);
 
 	return child;
 }
 
 pid_t fork(void) {
 	auto self = mlibc::get_current_tcb();
+	auto parent_tid = self->tid;
 	pid_t child;
 
 	MLIBC_CHECK_OR_ENOSYS(mlibc::IsImplemented<Fork>, -1);
@@ -1290,8 +1313,10 @@ pid_t fork(void) {
 
 		hand = hand->prev;
 	}
+	__dlapi_prefork();
 
 	if(int e = mlibc::sysdep_or_panic<Fork>(&child); e) {
+		__dlapi_postfork_finish();
 		errno = e;
 		return -1;
 	}
@@ -1299,6 +1324,9 @@ pid_t fork(void) {
 	// update the cached TID in the TCB
 	if (!child)
 		__atomic_store_n(&self->tid, mlibc::refetch_tid(), __ATOMIC_RELAXED);
+	if (!child)
+		__dlapi_postfork_rebind(parent_tid);
+	__dlapi_postfork_finish();
 
 	hand = self->atforkBegin;
 	while (hand) {
@@ -1317,6 +1345,7 @@ pid_t fork(void) {
 
 pid_t vfork(void) {
 	auto self = mlibc::get_current_tcb();
+	auto parent_tid = self->tid;
 	pid_t child;
 
 	/*
@@ -1342,6 +1371,8 @@ pid_t vfork(void) {
 	// update the cached TID in the TCB
 	if (!child)
 		__atomic_store_n(&self->tid, mlibc::refetch_tid(), __ATOMIC_RELAXED);
+	if (!child)
+		__dlapi_postfork_rebind(parent_tid);
 
 	return child;
 }

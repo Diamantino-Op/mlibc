@@ -16,7 +16,6 @@
 #include <protocols/posix/data.hpp>
 #include <protocols/posix/supercalls.hpp>
 
-void resetCancellationRequested();
 bool cancellationRequested();
 void setQueueHandle(HelHandle queue);
 
@@ -38,11 +37,13 @@ struct ElementHandle {
 		swap(u._queue, v._queue);
 		swap(u._n, v._n);
 		swap(u._data, v._data);
+		swap(u._context, v._context);
 	}
 
-	ElementHandle() : _queue{nullptr}, _n{-1}, _data{nullptr} {}
+	ElementHandle() : _queue{nullptr}, _n{-1}, _data{nullptr}, _context{0} {}
 
-	ElementHandle(Queue *queue, int n, void *data) : _queue{queue}, _n{n}, _data{data} {}
+	ElementHandle(Queue *queue, int n, void *data, uintptr_t context)
+	: _queue{queue}, _n{n}, _data{data}, _context{context} {}
 
 	ElementHandle(const ElementHandle &other);
 
@@ -57,12 +58,16 @@ struct ElementHandle {
 
 	void *data() { return _data; }
 
+	// Context that was passed at submission time.
+	uintptr_t context() { return _context; }
+
 	void advance(size_t size) { _data = reinterpret_cast<char *>(_data) + size; }
 
 private:
 	Queue *_queue;
 	int _n;
 	void *_data;
+	uintptr_t _context;
 };
 
 struct Queue {
@@ -216,9 +221,12 @@ struct Queue {
 		__atomic_fetch_or(&_queue->kernelNotify, kHelKernelNotifySqProgress, __ATOMIC_RELEASE);
 	}
 
-	frg::optional<ElementHandle> dequeueSingleUnlessCancelled() {
+private:
+	// If checkCancellation is true, return nullopt if cancellationRequested() becomes true (and do not wait for completion).
+	// Otherwise, always wait for completion (whether cancellationRequested() becomes true or not).
+	frg::optional<ElementHandle> dequeueSingle_(bool checkCancellation) {
 		while (true) {
-			auto progress = _waitProgressFutex();
+			auto progress = _waitProgressFutex(checkCancellation);
 
 			auto n = _retrieveChunk;
 			__ensure(_refCount[n]);
@@ -242,18 +250,18 @@ struct Queue {
 			auto element = reinterpret_cast<HelElement *>(ptr);
 			_lastProgress += sizeof(HelElement) + element->length;
 			_refCount[n]++;
-			return ElementHandle{this, n, ptr + sizeof(HelElement)};
+			return ElementHandle{this, n, ptr + sizeof(HelElement),
+					reinterpret_cast<uintptr_t>(element->context)};
 		}
 	}
 
+public:
+	frg::optional<ElementHandle> dequeueSingleUnlessCancelled() {
+		return dequeueSingle_(true);
+	}
+
 	ElementHandle dequeueSingle() {
-		while (true) {
-			auto result = dequeueSingleUnlessCancelled();
-			if (result)
-				return *result;
-			else
-				resetCancellationRequested();
-		}
+		return *dequeueSingle_(false);
 	}
 
 	void retire(int n) {
@@ -289,7 +297,7 @@ private:
 	};
 
 	// Postcondition: return value != FutexProgress::NONE.
-	FutexProgress _waitProgressFutex() {
+	FutexProgress _waitProgressFutex(bool checkCancellation) {
 		// userNotify bits checked by this function (these MUST be checked in the loop below!).
 		const auto relevantNotify = kHelUserNotifyCqProgress | kHelUserNotifyAlert;
 		// userNotify bits ignored by this function.
@@ -323,7 +331,7 @@ private:
 			if (!notifyToClear) {
 				__ensure(!(_pendingNotify & ~maskedNotify));
 
-				if (cancellationRequested())
+				if (checkCancellation && cancellationRequested())
 					return FutexProgress::CANCELLED;
 				int err = helDriveQueue(_handle, kHelDriveWait, maskedNotify);
 				if (err != kHelErrCancelled)
@@ -376,6 +384,7 @@ inline ElementHandle::ElementHandle(const ElementHandle &other) {
 	_queue = other._queue;
 	_n = other._n;
 	_data = other._data;
+	_context = other._context;
 
 	_queue->reference(_n);
 }
@@ -417,22 +426,27 @@ extern thread_local Queue globalQueue;
 // This include is here because it needs ElementHandle to be declared
 #include <helix/ipc-structs.hpp>
 
+inline void pushExchangeMsgsToSq(HelHandle lane, uintptr_t context,
+		const HelAction *actions, size_t count) {
+	HelSqExchangeMsgs header;
+	header.lane = lane;
+	header.count = count;
+	header.flags = 0;
+
+	frg::array<frg::span<const std::byte>, 2> segments{
+		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(&header), sizeof(header)},
+		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(actions),
+		                           count * sizeof(HelAction)}
+	};
+	globalQueue.pushSq(kHelSubmitExchangeMsgs, context, segments);
+}
+
 template <typename... Args>
 auto exchangeMsgsSync(HelHandle descriptor, Args &&...args) {
 	auto results = helix_ng::createResultsTuple(args...);
 	auto actions = helix_ng::chainActionArrays(args...);
 
-	HelSqExchangeMsgs header;
-	header.lane = descriptor;
-	header.count = actions.size();
-	header.flags = 0;
-
-	frg::array<frg::span<const std::byte>, 2> segments{
-		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(&header), sizeof(header)},
-		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(actions.data()),
-		                           actions.size() * sizeof(HelAction)}
-	};
-	globalQueue.pushSq(kHelSubmitExchangeMsgs, 0, segments);
+	pushExchangeMsgsToSq(descriptor, 0, actions.data(), actions.size());
 
 	auto element = globalQueue.dequeueSingle();
 	void *ptr = element.data();
@@ -445,40 +459,69 @@ auto exchangeMsgsSync(HelHandle descriptor, Args &&...args) {
 }
 
 template <typename... Args>
-auto exchangeMsgsSyncCancellable(HelHandle descriptor, uint64_t cancelId, int fd, Args &&...args) {
+auto exchangeMsgsSyncCancellable(HelHandle descriptor, uint64_t cancelId, Args &&...args) {
 	auto results = helix_ng::createResultsTuple(args...);
 	auto actions = helix_ng::chainActionArrays(args...);
 
-	HelSqExchangeMsgs header;
-	header.lane = descriptor;
-	header.count = actions.size();
-	header.flags = 0;
+	pushExchangeMsgsToSq(descriptor, 0, actions.data(), actions.size());
 
-	frg::array<frg::span<const std::byte>, 2> segments{
-		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(&header), sizeof(header)},
-		frg::span<const std::byte>{reinterpret_cast<const std::byte *>(actions.data()),
-		                           actions.size() * sizeof(HelAction)}
-	};
-	globalQueue.pushSq(kHelSubmitExchangeMsgs, 0, segments);
-
-	frg::optional<ElementHandle> element{};
-
-	do {
-		element = globalQueue.dequeueSingleUnlessCancelled();
-		if (!element) {
-			HEL_CHECK(helSyscall2(
-				kHelCallSuper + posix::superCancel,
-				cancelId,
-				fd
-			));
-			resetCancellationRequested();
-		}
-	} while (!element);
+	auto element = globalQueue.dequeueSingleUnlessCancelled();
+	if (!element) {
+		HEL_CHECK(helSyscall1(
+			kHelCallSuper + posix::superCancel,
+			cancelId
+		));
+		element = globalQueue.dequeueSingle();
+	}
 
 	void *ptr = element->data();
 
 	[&]<size_t... p>(std::index_sequence<p...>) {
 		(results.template get<p>().parse(ptr, *element), ...);
+	}(std::make_index_sequence<std::tuple_size_v<decltype(results)>>{});
+
+	return results;
+}
+
+// Like exchangeMsgsSync(), but allows sending a cancellation on the same lane.
+// Sending cancellation messages on the same lane guarantees ordering w.r.t. the initial request.
+template <typename MakeCancel, typename... Args>
+auto exchangeMsgsSyncCancelViaLane(HelHandle descriptor, MakeCancel &&makeCancel, Args &&...args) {
+	// Contexts that tell the request and the cancellation exchange apart on the queue.
+	constexpr uintptr_t reqContext = 1;
+	constexpr uintptr_t cancelContext = 2;
+
+	auto results = helix_ng::createResultsTuple(args...);
+	auto reqActions = helix_ng::chainActionArrays(args...);
+	pushExchangeMsgsToSq(descriptor, reqContext, reqActions.data(), reqActions.size());
+
+	// Wait for the request to complete or until cancellation is requested.
+	frg::optional<ElementHandle> reqElement = globalQueue.dequeueSingleUnlessCancelled();
+
+	// Handle cancellation if it occurred, then wait for request completion.
+	if (!reqElement) {
+		// Submit the cancellation on the same lane to guarantee ordering.
+		// Then wait for both request + cancellation to complete.
+		auto cancelExchange = makeCancel();
+		auto cancelActions = helix_ng::chainActionArrays(cancelExchange);
+		pushExchangeMsgsToSq(descriptor, cancelContext, cancelActions.data(), cancelActions.size());
+
+		bool cancelDone = false;
+		while (!reqElement || !cancelDone) {
+			auto element = globalQueue.dequeueSingle();
+			if (element.context() == reqContext) {
+				reqElement = std::move(element);
+			} else {
+				__ensure(element.context() == cancelContext);
+				cancelDone = true;
+			}
+		}
+	}
+
+	void *ptr = reqElement->data();
+
+	[&]<size_t... p>(std::index_sequence<p...>) {
+		(results.template get<p>().parse(ptr, *reqElement), ...);
 	}(std::make_index_sequence<std::tuple_size_v<decltype(results)>>{});
 
 	return results;

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <mlibc/allocator.hpp>
 #include <mlibc/global-config.hpp>
 
 namespace {
@@ -9,6 +10,12 @@ mlibc::GlobalConfig globalConfigInstance;
 
 namespace mlibc {
 
+namespace {
+
+constinit mlibc::lazy_eternal<GlobalConfig> globalConfigInstance;
+
+} // namespace
+
 struct GlobalConfigGuard {
 	GlobalConfigGuard();
 };
@@ -17,7 +24,7 @@ GlobalConfigGuard guard;
 
 GlobalConfigGuard::GlobalConfigGuard() {
 	// Force the config to be created during initialization of libc.so.
-    globalConfigInstance = {};
+	globalConfigInstance.get();
 }
 
 static bool envEnabled(const char *env) {
@@ -35,7 +42,7 @@ GlobalConfig::GlobalConfig() {
 }
 
 const GlobalConfig &globalConfig() {
-    return globalConfigInstance;
+	return globalConfigInstance.get();
 }
 
 } // namespace mlibc

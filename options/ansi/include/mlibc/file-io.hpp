@@ -90,13 +90,14 @@ protected:
 	virtual int io_seek(off_t offset, int whence, off_t *new_offset) = 0;
 	virtual int post_flush();
 
+	void _reset_type_and_bufmode();
 	int _reset();
 private:
 	int _init_type();
 	int _init_bufmode();
 
 	int _write_back();
-	int _save_pos();
+	int _save_pos(bool &preserve_buffer);
 
 	void _ensure_allocation();
 
@@ -146,6 +147,10 @@ template <typename T>
 void file_dispose_cb(abstract_file *base) {
 	frg::destruct(getAllocator(), static_cast<T *>(base));
 }
+
+// Flushes every open FILE without closing it. Called from __mlibc_do_finalize()
+// after the program's destructors, so that stdio stays usable in them.
+void flush_all_files();
 
 } // namespace mlibc
 

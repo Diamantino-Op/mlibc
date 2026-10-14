@@ -82,6 +82,13 @@ int main() {
 	assert(wcrtomb(representation, 0xaabbccdd, &state) == (size_t)-1);
 	assert(errno == EILSEQ);
 
+	FILE *stream = tmpfile();
+	assert(stream);
+	errno = 0;
+	assert(fprintf(stream, "%lc", (wint_t)0xaabbccdd) < 0);
+	assert(errno == EILSEQ);
+	assert(fclose(stream) == 0);
+
 	wchar_t wc;
 	assert(mbtowc(&wc, "", 1) == 0);
 	assert(wc == L'\0');
@@ -92,6 +99,28 @@ int main() {
 	assert(mbrtowc(NULL, "\xE2\x9C", 1000, &state) == (size_t)-1);
 	assert(errno == EILSEQ);
 	assert(mbrtowc(NULL, "\xE2\x9C", 2, &state) == (size_t)-2);
+
+	// check 0-sized mbtowc
+	char zero = '\0';
+	char nonzero = 'c';
+	assert(mbtowc(&wc, &zero, 0) == 0);
+	assert(mbtowc(NULL, &zero, 0) == 0);
+	assert(mbtowc(&wc, &nonzero, 0) == -1 && errno == EILSEQ);
+	assert(mbtowc(NULL, &nonzero, 0) == -1 && errno == EILSEQ);
+	assert(mbtowc(&wc, NULL, 0) == 0);
+	assert(mbtowc(NULL, NULL, 0) == 0);
+
+	setlocale(LC_ALL, "POSIX");
+
+#if !USE_HOST_LIBC && !USE_CROSS_LIBC
+	// Yep, glibc messes this up.
+	for (int c = 0; c <= 255; c++) {
+		char buf[2] = {(char) c, '\0'};
+		wchar_t out[2] = {0, 0};
+		int ret = mbtowc(out, buf, 1);
+		assert(ret == 0 || ret == 1);
+	}
+#endif // !USE_HOST_LIBC && !USE_CROSS_LIBC
 
 	return 0;
 }

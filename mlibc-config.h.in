@@ -95,7 +95,9 @@
 #	define __MLIBC_XOPEN 800
 #endif
 
+#mesondefine __MLIBC_ABI
 #mesondefine __MLIBC_BSD_OPTION
+#mesondefine __MLIBC_BSD_PROCDESC_OPTION
 #mesondefine __MLIBC_LINUX_EPOLL_OPTION
 #mesondefine __MLIBC_LINUX_TIMERFD_OPTION
 #mesondefine __MLIBC_LINUX_SIGNALFD_OPTION

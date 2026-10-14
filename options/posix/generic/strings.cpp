@@ -73,10 +73,32 @@ int ffsll(long long i) {
 }
 
 int strcasecmp(const char *a, const char *b) {
+	if (a == b)
+		return 0;
+
 	size_t i = 0;
 	while(true) {
-		unsigned char a_byte = tolower(a[i]);
-		unsigned char b_byte = tolower(b[i]);
+		unsigned char a_byte = tolower(static_cast<unsigned char>(a[i]));
+		unsigned char b_byte = tolower(static_cast<unsigned char>(b[i]));
+		if(!a_byte && !b_byte)
+			return 0;
+		// If only one char is null, one of the following cases applies.
+		if(a_byte < b_byte)
+			return -1;
+		if(a_byte > b_byte)
+			return 1;
+		i++;
+	}
+}
+
+int strcasecmp_l(const char *a, const char *b, locale_t locale) {
+	if (a == b)
+		return 0;
+
+	size_t i = 0;
+	while(true) {
+		unsigned char a_byte = tolower_l(static_cast<unsigned char>(a[i]), locale);
+		unsigned char b_byte = tolower_l(static_cast<unsigned char>(b[i]), locale);
 		if(!a_byte && !b_byte)
 			return 0;
 		// If only one char is null, one of the following cases applies.
@@ -90,6 +112,10 @@ int strcasecmp(const char *a, const char *b) {
 
 int strncasecmp(const char *a, const char *b, size_t size) {
 	return mlibc::strncasecmp(a, b, size);
+}
+
+int strncasecmp_l(const char *a, const char *b, size_t size, locale_t locale) {
+	return mlibc::strncasecmp(a, b, size, static_cast<mlibc::localeinfo *>(locale));
 }
 
 // Marked as obsolete in posix 2008 but used by at least tracker

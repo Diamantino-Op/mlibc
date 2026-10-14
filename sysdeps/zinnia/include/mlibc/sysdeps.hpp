@@ -26,6 +26,7 @@ struct ZinniaSysdepTags :
 	ThreadExit,
 	ClockGet,
 	ClockGetres,
+	ClockSet,
 	Flock,
 	OpenDir,
 	ReadEntries,
@@ -43,6 +44,8 @@ struct ZinniaSysdepTags :
 	Readlinkat,
 	Rmdir,
 	Ftruncate,
+	Truncate,
+	Fadvise,
 	Fallocate,
 	Unlinkat,
 	Socket,
@@ -79,6 +82,7 @@ struct ZinniaSysdepTags :
 	Waitpid,
 	Fork,
 	Execve,
+	Fexecve,
 	Pselect,
 	GetRusage,
 	GetRlimit,
@@ -111,6 +115,10 @@ struct ZinniaSysdepTags :
 	SetSid,
 	Tcgetattr,
 	Tcsetattr,
+	Tcsendbreak,
+	Tcdrain,
+	Tcflow,
+	Tcflush,
 	Tcgetwinsize,
 	Tcsetwinsize,
 	Pipe,
@@ -121,6 +129,8 @@ struct ZinniaSysdepTags :
 	Sigaction,
 	Sigtimedwait,
 	Kill,
+	Sigqueue,
+	Nice,
 	GetHostname,
 	SetHostname,
 	Mkfifoat,
@@ -133,10 +143,13 @@ struct ZinniaSysdepTags :
 	Sigsuspend,
 	Sigpending,
 	Madvise,
+	PosixMadvise,
 	GetItimer,
 	SetItimer,
 	TimerCreate,
 	TimerSettime,
+	TimerGettime,
+	TimerGetoverrun,
 	TimerDelete,
 	Uname,
 	SetResuid,
@@ -154,6 +167,7 @@ struct ZinniaSysdepTags :
 	IfNametoindex,
 	Clone,
 	PrepareStack,
+	GetCurrentStackInfo,
 	Reboot,
 	Readv,
 	Writev,
@@ -165,10 +179,17 @@ struct ZinniaSysdepTags :
 	TimerfdCreate,
 	TimerfdSettime,
 	TimerfdGettime,
-	Msync
+	Msync,
+	InetConfigured,
+	Sysconf,
+	Pause
 {};
 
 template<typename Tag>
 using Sysdeps = SysdepOf<ZinniaSysdepTags, Tag>;
+
+struct SysdepTraits {
+	static constexpr bool usesRtNetlink = false;
+};
 
 } // namespace mlibc

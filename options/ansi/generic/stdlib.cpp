@@ -38,7 +38,7 @@ namespace {
 	thread_local __mlibc_mbstate mblen_state = __MLIBC_MBSTATE_INITIALIZER;
 	thread_local __mlibc_mbstate mbtowc_state = __MLIBC_MBSTATE_INITIALIZER;
 
-	__mlibc_mutex exit_mutex = __MLIBC_THREAD_MUTEX_INITIALIZER;
+	__mlibc_mutex exit_mutex{};
 } // namespace
 
 double atof(const char *string) {
@@ -70,9 +70,7 @@ extern "C" {
 __attribute__((__noreturn__)) void siglongjmp(sigjmp_buf buffer, int value) {
 	if (buffer[0].__savesigs)
 		sigprocmask(SIG_SETMASK, &buffer[0].__sigset, nullptr);
-	jmp_buf b;
-	b[0].__reg_state = buffer[0].__reg_state;
-	longjmp(b, value);
+	longjmp(buffer, value);
 }
 
 double strtod(const char *__restrict string, char **__restrict end) {
@@ -122,25 +120,17 @@ void srand(unsigned int s) {
 }
 
 void *aligned_alloc(size_t alignment, size_t size) {
-	void *ptr;
-
 	// alignment must be a power of two, and size % alignment must be 0
 	if (alignment & (alignment - 1) || size & (alignment - 1)) {
 		errno = EINVAL;
 		return nullptr;
 	}
-
-	// posix_memalign requires that the alignment is a multiple of sizeof(void *)
-	if (alignment < sizeof(void *))
-		alignment = sizeof(void *);
-
-	int ret = posix_memalign(&ptr, alignment, size);
-	if (ret) {
-		errno = ret;
+	auto p = getAllocator().allocate(size, alignment);
+	if (!p) {
+		errno = ENOMEM;
 		return nullptr;
 	}
-	return ptr;
-
+	return p;
 }
 void *calloc(size_t count, size_t size) {
 	// we want to ensure that count*size > SIZE_MAX doesn't happen
@@ -199,14 +189,30 @@ int atexit(void (*func)(void)) {
 
 namespace {
 
-frg::vector<void (*)(void), MemoryAllocator> quickExitQueue{getAllocator()};
-__mlibc_mutex quickExitQueueMutex = __MLIBC_THREAD_MUTEX_INITIALIZER;
+using QuickExitQueue = frg::vector<void (*)(void), MemoryAllocator>;
+
+// Wrapper so that lazy_eternal, which default-constructs, can pass the
+// allocator. Same pattern as the exit queue in options/lsb/generic/dso_exit.cpp.
+struct QuickExitQueueWrapper {
+	QuickExitQueueWrapper() : queue{getAllocator()} { }
+	QuickExitQueue queue;
+};
+
+// Built on first use: initialising from .init_array would run after the
+// program's constructors, so at_quick_exit() from one faulted on a null allocator.
+constinit mlibc::lazy_eternal<QuickExitQueueWrapper> quickExitQueueInstance;
+
+QuickExitQueue &quickExitQueue() {
+	return quickExitQueueInstance.get().queue;
+}
+
+__mlibc_mutex quickExitQueueMutex{};
 
 } // namespace
 
 int at_quick_exit(void (*func)(void)) {
 	mlibc::thread_mutex_lock(&quickExitQueueMutex);
-	quickExitQueue.push(func);
+	quickExitQueue().push(func);
 	mlibc::thread_mutex_unlock(&quickExitQueueMutex);
 
 	return 0;
@@ -231,8 +237,8 @@ void _Exit(int status) {
 void quick_exit(int status) {
 	mlibc::thread_mutex_lock(&quickExitQueueMutex);
 
-	while (!quickExitQueue.empty()) {
-		auto func = quickExitQueue.pop();
+	while (!quickExitQueue().empty()) {
+		auto func = quickExitQueue().pop();
 		func();
 	}
 
@@ -330,24 +336,12 @@ void *bsearch(const void *key, const void *base, size_t count, size_t size,
 	return nullptr;
 }
 
-static int qsort_callback(const void *a, const void *b, void *arg) {
-	auto compare = reinterpret_cast<int (*)(const void *, const void *)>(arg);
-
-	return compare(a, b);
-}
-
-void qsort(void *base, size_t count, size_t size,
-		int (*compare)(const void *, const void *)) {
-	return qsort_r(base, count, size, qsort_callback, (void *) compare);
-}
-
-void qsort_r(void *base, size_t count, size_t size,
-		int (*compare)(const void *, const void *, void *),
-		void *arg) {
+template<typename Compare>
+static void qsort_impl(void *base, size_t count, size_t size, Compare compare) {
 	auto compare_idx = [&] (size_t i, size_t j) -> int {
 		auto *pi = reinterpret_cast<uint8_t *>(base) + i * size;
 		auto *pj = reinterpret_cast<uint8_t *>(base) + j * size;
-		return compare(pi, pj, arg);
+		return compare(pi, pj);
 	};
 
 	auto swap_idx = [&] (size_t i, size_t j) {
@@ -387,6 +381,21 @@ void qsort_r(void *base, size_t count, size_t size,
 	};
 
 	quick_sort(0, count);
+}
+
+void qsort(void *base, size_t count, size_t size,
+		int (*compare)(const void *, const void *)) {
+	qsort_impl(base, count, size, [compare] (const void *a, const void *b) {
+		return compare(a, b);
+	});
+}
+
+void qsort_r(void *base, size_t count, size_t size,
+		int (*compare)(const void *, const void *, void *),
+		void *arg) {
+	qsort_impl(base, count, size, [compare, arg] (const void *a, const void *b) {
+		return compare(a, b, arg);
+	});
 }
 
 int abs(int num) {
@@ -447,7 +456,6 @@ int mblen(const char *mbs, size_t mb_limit) {
 
 int mbtowc(wchar_t *__restrict wc, const char *__restrict mb, size_t max_size) {
 	auto cc = mlibc::current_charcode();
-	__ensure(max_size);
 
 	// If wc is NULL, decode into a single local character which we discard
 	// to obtain the length.
@@ -457,6 +465,11 @@ int mbtowc(wchar_t *__restrict wc, const char *__restrict mb, size_t max_size) {
 
 	if (mb) {
 		if (*mb) {
+			if (max_size == 0) {
+				errno = EILSEQ;
+				return -1;
+			}
+
 			mlibc::code_seq<wchar_t> wseq{wc, wc + 1};
 			mlibc::code_seq<const char> nseq{mb, mb + frg::min(max_size, MB_CUR_MAX)};
 			auto e = cc->decode_wtranscode(nseq, wseq, mbtowc_state);
@@ -566,12 +579,9 @@ int posix_memalign(void **out, size_t align, size_t size) {
 		return EINVAL;
 	if(align & (align - 1)) // Make sure that align is a power of two.
 		return EINVAL;
-	auto p = getAllocator().allocate(frg::max(align, size));
+	auto p = getAllocator().allocate(size, align);
 	if(!p)
 		return ENOMEM;
-	// Hope that the alignment was respected. This works on the current allocator.
-	// TODO: Make the allocator alignment-aware.
-	__ensure(!(reinterpret_cast<uintptr_t>(p) & (align - 1)));
 	*out = p;
 	return 0;
 }

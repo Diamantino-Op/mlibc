@@ -28,6 +28,8 @@ struct ManagarmSysdepTags :
 	Pipe,
 	SetResuid,
 	SetResgid,
+	GetResuid,
+	GetResgid,
 	SetReuid,
 	SetRegid,
 	Sysinfo,
@@ -102,11 +104,13 @@ struct ManagarmSysdepTags :
 	Waitid,
 	Reboot,
 	Getifaddrs,
+	Freeifaddrs,
 	PidfdOpen,
 	PidfdGetpid,
 	PidfdSendSignal,
 	Ppoll,
 	Renameat,
+	Renameat2,
 	GetTid,
 	GetUid,
 	GetEuid,
@@ -138,8 +142,10 @@ struct ManagarmSysdepTags :
 	GetPgid,
 	GetGroups,
 	Dup,
+	Sync,
 	Fsync,
 	Fdatasync,
+	Syncfs,
 	GetEntropy,
 	Sigtimedwait,
 	NameToHandleAt,
@@ -211,5 +217,9 @@ struct ManagarmSysdepTags :
 
 template<typename Tag>
 using Sysdeps = SysdepOf<ManagarmSysdepTags, Tag>;
+
+struct SysdepTraits {
+	static constexpr bool usesRtNetlink = true;
+};
 
 } // namespace mlibc

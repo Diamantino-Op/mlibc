@@ -61,6 +61,7 @@ libc_sources += files(
 	'generic/mqueue.cpp',
 	'generic/utmpx.cpp',
 	'generic/monetary.cpp',
+	'generic/aio.cpp',
 )
 
 if not headers_only
@@ -115,6 +116,7 @@ if not no_headers
 		'include/tar.h',
 		'include/cpio.h',
 		'include/monetary.h',
+		'include/aio.h',
 	)
 	install_headers(
 		'include/arpa/inet.h',
@@ -181,8 +183,6 @@ if not no_headers
 		'include/bits/posix/stat.h',
 		'include/bits/posix/pthread_t.h',
 		'include/bits/posix/timer_t.h',
-		'include/bits/posix/pthread_types.h',
-		'include/bits/posix/pthread_attr_t.h',
 		subdir: 'bits/posix'
 	)
 endif

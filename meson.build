@@ -1,5 +1,6 @@
 project(
 	'mlibc',
+	version: '7.0.0',
 	default_options: [
 		'cpp_std=c++23',
 		'c_std=gnu11',
@@ -52,6 +53,7 @@ if cross_libc_ld_prefix == '' or build_machine.cpu_family() == host_machine.cpu_
 endif
 
 libgcc_dependency = get_option('libgcc_dependency')
+ifuncs_supported = false
 internal_conf = configuration_data()
 mlibc_conf = configuration_data()
 
@@ -64,6 +66,23 @@ if not headers_only
 	if cpp_compiler.get_id() == 'gcc' and not cpp_compiler.version().version_compare('>=13.1.0')
 		error('GCC version 13 or higher is required; found version ' + cpp_compiler.version())
 	endif
+
+	ifunc_check = '''
+	static_assert(__has_attribute(ifunc));
+	void my_func_impl() {}
+
+	extern "C" void (*resolver())() {
+		return my_func_impl;
+	}
+
+	void my_func() __attribute__((ifunc("resolver")));
+
+	int main() {
+		return 0;
+	}
+	'''
+
+	ifuncs_supported = cpp_compiler.compiles(ifunc_check, name: 'C++ compiler supports ifunc')
 
 	target_triple = run_command(c_compiler.cmd_array(), '-dumpmachine', check: true).stdout()
 	use_freestnd_hdrs = get_option('use_freestnd_hdrs').disable_auto_if(
@@ -108,6 +127,10 @@ if not headers_only
 	mlibc_link_args = ['-nostdlib']
 	add_project_arguments('-Werror=misleading-indentation', language: ['c', 'cpp'])
 	add_project_arguments('-fno-rtti', '-fno-exceptions', language: 'cpp')
+
+	# mlibc uses the priority range reserved for the C library, which GCC warns about.
+	add_project_arguments(cpp_compiler.get_supported_arguments('-Wno-prio-ctor-dtor'),
+		language: 'cpp')
 
 	if get_option('buildtype').startswith('debug')
 		add_project_arguments('-D__MLIBC_DEBUG', language : ['c', 'cpp'])
@@ -211,6 +234,12 @@ if default_library_paths.length() == 0
 	endif
 endif
 
+if get_option('mlibc_abi') == 'next'
+	mlibc_abi = 8
+else
+	mlibc_abi = get_option('mlibc_abi').to_int()
+endif
+
 internal_conf.set_quoted('MLIBC_SYSTEM_NAME', host_machine.system())
 internal_conf.set_quoted('MLIBC_DEFAULT_LIBRARY_PATHS', '\\n'.join(default_library_paths))
 internal_conf.set('MLIBC_NUM_DEFAULT_LIBRARY_PATHS', default_library_paths.length())
@@ -218,6 +247,7 @@ internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', false)
 internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', false)
 internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', false)
 internal_conf.set10('MLIBC_DEBUG_ALLOCATOR', get_option('debug_allocator'))
+internal_conf.set10('MLIBC_IFUNCS_SUPPORTED', ifuncs_supported)
 
 #----------------------------------------------------------------------------------------
 # Configuration based on sysdeps.
@@ -258,11 +288,6 @@ elif host_machine.system() == 'managarm'
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/managarm')
-elif host_machine.system() == 'ironclad'
-	rtld_include_dirs += include_directories('sysdeps/ironclad/include')
-	libc_include_dirs += include_directories('sysdeps/ironclad/include')
-	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
-	subdir('sysdeps/ironclad')
 elif host_machine.system() == 'keyronex'
 	rtld_include_dirs += include_directories('sysdeps/keyronex/include')
 	libc_include_dirs += include_directories('sysdeps/keyronex/include')
@@ -290,6 +315,13 @@ elif host_machine.system() == 'zinnia'
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/zinnia')
+elif host_machine.system() == 'ethereal'
+	rtld_include_dirs += include_directories('sysdeps/ethereal/include')
+	libc_include_dirs += include_directories('sysdeps/ethereal/include')
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', false)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	subdir('sysdeps/ethereal')
 elif host_machine.system() == 'horizonos'
 	rtld_include_dirs += include_directories('sysdeps/horizonos/include')
 	libc_include_dirs += include_directories('sysdeps/horizonos/include')
@@ -313,6 +345,7 @@ posix_option = get_option('posix_option').require(sysdep_supported_options.get('
 linux_option = get_option('linux_option').require(sysdep_supported_options.get('linux', false)).allowed()
 glibc_option = get_option('glibc_option').require(sysdep_supported_options.get('glibc', false)).allowed()
 bsd_option = get_option('bsd_option').require(sysdep_supported_options.get('bsd', false)).allowed()
+bsd_procdesc_option = sysdep_supported_options.get('bsd-procdesc', false)
 linux_epoll_option = sysdep_supported_options.get('linux-epoll', linux_option)
 linux_timerfd_option = sysdep_supported_options.get('linux-timerfd', linux_option)
 linux_signalfd_option = sysdep_supported_options.get('linux-signalfd', linux_option)
@@ -320,10 +353,12 @@ linux_eventfd_option = sysdep_supported_options.get('linux-eventfd', linux_optio
 linux_reboot_option = sysdep_supported_options.get('linux-reboot', linux_option)
 linux_wrappers_option = linux_option and sysdep_supported_options.get('linux_wrappers', false)
 
+mlibc_conf.set('__MLIBC_ABI', mlibc_abi)
 mlibc_conf.set10('__MLIBC_POSIX_OPTION', posix_option)
 mlibc_conf.set10('__MLIBC_LINUX_OPTION', linux_option)
 mlibc_conf.set10('__MLIBC_GLIBC_OPTION', glibc_option)
 mlibc_conf.set10('__MLIBC_BSD_OPTION', bsd_option)
+mlibc_conf.set10('__MLIBC_BSD_PROCDESC_OPTION', bsd_procdesc_option)
 mlibc_conf.set10('__MLIBC_LINUX_EPOLL_OPTION', linux_epoll_option)
 mlibc_conf.set10('__MLIBC_LINUX_TIMERFD_OPTION', linux_timerfd_option)
 mlibc_conf.set10('__MLIBC_LINUX_SIGNALFD_OPTION', linux_signalfd_option)
@@ -397,6 +432,11 @@ if bsd_option
 	libc_include_dirs += include_directories('options/bsd/include')
 endif
 
+if bsd_procdesc_option
+	rtld_include_dirs += include_directories('options/bsd-procdesc/include')
+	libc_include_dirs += include_directories('options/bsd-procdesc/include')
+endif
+
 if linux_epoll_option
 	rtld_include_dirs += include_directories('options/linux-epoll/include')
 	libc_include_dirs += include_directories('options/linux-epoll/include')
@@ -464,6 +504,8 @@ internal_sources = [
 	'options/internal/gcc/stack_protector.cpp',
 	'options/internal/gcc/guard-abi.cpp',
 	'options/internal/gcc-extra/cxxabi.cpp',
+	'options/internal' / host_machine.cpu_family() / 'assembly-asserts.cpp',
+	'options/internal' / host_machine.cpu_family() / 'atomics.cpp',
 	'options/internal' / host_machine.cpu_family() / 'setjmp.S',
 	'options/internal' / host_machine.cpu_family() / 'fenv.S',
 ]
@@ -514,6 +556,10 @@ if not no_headers
 		'options/internal/include/bits/getopt.h',
 		'options/internal/include/bits/reclen_t.h',
 		'options/internal/include/bits/timeval.h',
+		'options/internal/include/bits/pthread_types.h',
+		'options/internal/include/bits/pthread_attr_t.h',
+		'options/internal/include/bits/pthread_sizes.h',
+		'options/internal/include/bits/sysmacros.h',
 		subdir: 'bits'
 	)
 endif
@@ -535,6 +581,10 @@ rtld_sources += [
 
 rtld_dso_sources += ['options/rtld' / host_machine.cpu_family() / 'entry.S']
 
+static_cpp_args = []
+ld_cpp_args = []
+libc_cpp_args = []
+
 subdir('options/elf')
 subdir('options/ansi')
 subdir('options/posix')
@@ -543,6 +593,7 @@ subdir('options/glibc')
 subdir('options/linux-wrappers')
 subdir('options/linux')
 subdir('options/bsd')
+subdir('options/bsd-procdesc')
 subdir('options/linux-epoll')
 subdir('options/linux-timerfd')
 subdir('options/linux-signalfd')
@@ -566,7 +617,7 @@ if not headers_only
 		rtlib_deps += libgcc
 	endif
 
-	ld_cpp_args = [
+	ld_cpp_args += [
 		'-fvisibility=hidden',
 		'-fvisibility-inlines-hidden',
 		'-fno-stack-protector',
@@ -575,7 +626,7 @@ if not headers_only
 		'-Wno-unknown-pragmas',
 	] + mlibc_c_args
 
-	libc_cpp_args = [
+	libc_cpp_args += [
 		'-Wno-unknown-pragmas',
 		'-DFRG_HAVE_LIBC',
 	] + mlibc_c_args
@@ -600,29 +651,28 @@ if not headers_only
 
 	# Our libraries have different behaviour when built as static and shared libraries.
 	# Hence we need to rebuild the object files with a different define for each mode.
-	if library_type in ['static', 'both']
-		static_cpp_args = [
-			'-DMLIBC_STATIC_BUILD',
-		]
-		ld_static_lib = static_library(ld_library_name, rtld_sources,
-			name_prefix: '',
-			cpp_args: mlibc_c_args + ld_cpp_args + static_cpp_args,
-			link_args: mlibc_link_args,
-			include_directories: rtld_include_dirs,
-			dependencies: rtld_deps + rtlib_deps,
-			install: false
-		)
-		libc_static = static_library('c', libc_all_sources,
-			c_args: mlibc_c_args,
-			cpp_args: static_cpp_args + ['-fno-stack-protector', libc_cpp_args],
-			link_args: mlibc_link_args,
-			include_directories: libc_include_dirs,
-			dependencies: libc_deps + rtlib_deps,
-			link_with: [ld_static_lib],
-			link_whole: [libc_sublibs, ld_static_lib],
-			install: true
-		)
-	endif
+	static_cpp_args += [
+		'-DMLIBC_STATIC_BUILD',
+	]
+	ld_static_lib = static_library(ld_library_name, rtld_sources,
+		name_prefix: '',
+		cpp_args: mlibc_c_args + ld_cpp_args + static_cpp_args,
+		link_args: mlibc_link_args,
+		include_directories: rtld_include_dirs,
+		dependencies: rtld_deps + rtlib_deps,
+		install: false
+	)
+	libc_static = static_library('c', libc_all_sources,
+		c_args: mlibc_c_args,
+		cpp_args: static_cpp_args + ['-fno-stack-protector', libc_cpp_args],
+		link_args: mlibc_link_args,
+		include_directories: libc_include_dirs,
+		dependencies: libc_deps + rtlib_deps,
+		link_with: [ld_static_lib],
+		link_whole: [libc_sublibs, ld_static_lib],
+		install: true
+	)
+
 	if library_type in ['shared', 'both']
 		ld_shared_lib = shared_library(ld_library_name, rtld_sources + rtld_dso_sources,
 			name_prefix: '',
@@ -654,7 +704,12 @@ if not headers_only
 	library('resolv', 'dummy-libs/libresolv/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
 	library('dl', 'dummy-libs/libdl/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
 	library('ssp', 'dummy-libs/libssp/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
-	library('ssp_nonshared', 'dummy-libs/libssp_nonshared/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	if mlibc_abi >= 8
+		static_library('ssp_nonshared', 'dummy-libs/libssp_nonshared/src/dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	else
+		# ABI 7 shipped libssp_nonshared as a shared library that binaries depend on.
+		library('ssp_nonshared', 'dummy-libs/libssp_nonshared/src/shared-dummy.cpp', cpp_args: libc_cpp_args, link_args: mlibc_link_args, install: true)
+	endif
 endif
 
 summary_info = {}
@@ -665,6 +720,7 @@ summary(summary_info, bool_yn: true, section: 'tests')
 
 summary_info = {}
 summary_info += {'headers-only': headers_only}
+summary_info += {'ABI': mlibc_abi}
 summary_info += {'POSIX option': get_option('posix_option')}
 summary_info += {'Linux option': get_option('linux_option')}
 summary_info += {'glibc option': get_option('glibc_option')}
@@ -675,6 +731,7 @@ summary(summary_info, bool_yn: true, section: 'mlibc options')
 
 if build_tests
 	subdir('tests/')
+	subdir('benchmarks/')
 endif
 
 hdoc = find_program('hdoc', required: false)

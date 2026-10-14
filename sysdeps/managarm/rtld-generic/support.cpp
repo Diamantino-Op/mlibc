@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
@@ -34,7 +35,7 @@ void cacheFileTable() {
 
 	posix::ManagarmProcessData data;
 	HEL_CHECK(
-	    helSyscall1(kHelCallSuper + posix::superGetProcessData, reinterpret_cast<HelWord>(&data))
+	    helSyscall2(kHelCallSuper + posix::superGetProcessData, reinterpret_cast<HelWord>(&data), sizeof(posix::ManagarmProcessData))
 	);
 	posixLane = data.posixLane;
 	fileTable = data.fileTable;
@@ -275,9 +276,9 @@ private:
 
 frg::manual_box<Queue> globalQueue;
 
-extern "C" [[ gnu::visibility("default") ]] void __dlapi_postfork() {
-	globalQueue.destruct();
-	globalQueue.initialize();
+extern "C" void __mlibc_sysdep_rtld_postfork() {
+	if(globalQueue.valid())
+		globalQueue.destruct();
 	fileTable = nullptr;
 }
 
@@ -327,17 +328,17 @@ int Sysdeps<Open>::operator()(const char *path, int flags, mode_t mode, int *fd)
 	cacheFileTable();
 	HelAction actions[4];
 
-	managarm::posix::OpenAtRequest<MemoryAllocator> req(getAllocator());
+	managarm::posix::OpenAtRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_fd(AT_FDCWD);
 	req.set_flags(flags);
 	req.set_mode(mode);
-	req.set_path(frg::string<MemoryAllocator>(getAllocator(), path));
+	req.set_path(frg::string<LdsoAllocator>(getLdsoAllocator(), path));
 
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> head(getAllocator());
-	frg::string<MemoryAllocator> tail(getAllocator());
+	frg::string<LdsoAllocator> head(getLdsoAllocator());
+	frg::string<LdsoAllocator> tail(getLdsoAllocator());
 	head.resize(req.size_of_head());
 	tail.resize(req.size_of_tail());
 	bragi::limited_writer headWriter{head.data(), head.size()};
@@ -378,13 +379,137 @@ int Sysdeps<Open>::operator()(const char *path, int flags, mode_t mode, int *fd)
 	HEL_CHECK(send_tail->error);
 	HEL_CHECK(recv_resp->error);
 
-	managarm::posix::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::posix::OpenAtResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 
 	if (resp.error() == managarm::posix::Errors::FILE_NOT_FOUND)
 		return -1;
 	__ensure(resp.error() == managarm::posix::Errors::SUCCESS);
 	*fd = resp.fd();
+	return 0;
+}
+
+int Sysdeps<Stat>::operator()(
+    fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *result
+) {
+	cacheFileTable();
+	HelAction actions[4];
+
+	managarm::posix::FstatAtRequest<LdsoAllocator> req(getLdsoAllocator());
+	if (fsfdt == fsfd_target::path) {
+		req.set_fd(AT_FDCWD);
+		req.set_path(frg::string<LdsoAllocator>(getLdsoAllocator(), path));
+	} else if (fsfdt == fsfd_target::fd) {
+		flags |= AT_EMPTY_PATH;
+		req.set_fd(fd);
+	} else {
+		__ensure(fsfdt == fsfd_target::fd_path);
+		req.set_fd(fd);
+		req.set_path(frg::string<LdsoAllocator>(getLdsoAllocator(), path));
+	}
+
+	if (!(flags & AT_EMPTY_PATH) && (!path || !strlen(path)))
+		return ENOENT;
+
+	req.set_flags(flags);
+
+	if (!globalQueue.valid())
+		globalQueue.initialize();
+
+	frg::string<LdsoAllocator> head(getLdsoAllocator());
+	frg::string<LdsoAllocator> tail(getLdsoAllocator());
+	head.resize(req.size_of_head());
+	tail.resize(req.size_of_tail());
+	bragi::limited_writer headWriter{head.data(), head.size()};
+	bragi::limited_writer tailWriter{tail.data(), tail.size()};
+	auto headOk = req.encode_head(headWriter);
+	auto tailOk = req.encode_tail(tailWriter);
+	__ensure(headOk);
+	__ensure(tailOk);
+
+	actions[0].type = kHelActionOffer;
+	actions[0].flags = kHelItemAncillary;
+	actions[1].type = kHelActionSendFromBuffer;
+	actions[1].flags = kHelItemChain;
+	actions[1].buffer = head.data();
+	actions[1].length = head.size();
+	actions[2].type = kHelActionSendFromBuffer;
+	actions[2].flags = kHelItemChain;
+	actions[2].buffer = tail.data();
+	actions[2].length = tail.size();
+	actions[3].type = kHelActionRecvInline;
+	actions[3].flags = 0;
+
+	HelSqExchangeMsgs sqHeader;
+	sqHeader.lane = posixLane;
+	sqHeader.count = 4;
+	sqHeader.flags = 0;
+	const void *segments[] = {&sqHeader, actions};
+	size_t segmentSizes[] = {sizeof(sqHeader), 4 * sizeof(HelAction)};
+	globalQueue->pushSq(kHelSubmitExchangeMsgs, 0, segments, segmentSizes, 2);
+
+	auto element = globalQueue->dequeueSingle();
+	auto offer = parseHandle(element);
+	auto send_head = parseSimple(element);
+	auto send_tail = parseSimple(element);
+	auto recv_resp = parseInline(element);
+	HEL_CHECK(offer->error);
+	HEL_CHECK(send_head->error);
+	HEL_CHECK(send_tail->error);
+	HEL_CHECK(recv_resp->error);
+
+	managarm::posix::FstatAtResponse<LdsoAllocator> resp(getLdsoAllocator());
+	resp.ParseFromArray(recv_resp->data, recv_resp->length);
+
+	if (resp.error() == managarm::posix::Errors::FILE_NOT_FOUND)
+		return ENOENT;
+	if (resp.error() != managarm::posix::Errors::SUCCESS)
+		return EIO;
+
+	memset(result, 0, sizeof(struct stat));
+
+	switch (resp.file_type()) {
+		case managarm::posix::FileType::FT_REGULAR:
+			result->st_mode = S_IFREG;
+			break;
+		case managarm::posix::FileType::FT_DIRECTORY:
+			result->st_mode = S_IFDIR;
+			break;
+		case managarm::posix::FileType::FT_SYMLINK:
+			result->st_mode = S_IFLNK;
+			break;
+		case managarm::posix::FileType::FT_CHAR_DEVICE:
+			result->st_mode = S_IFCHR;
+			break;
+		case managarm::posix::FileType::FT_BLOCK_DEVICE:
+			result->st_mode = S_IFBLK;
+			break;
+		case managarm::posix::FileType::FT_SOCKET:
+			result->st_mode = S_IFSOCK;
+			break;
+		case managarm::posix::FileType::FT_FIFO:
+			result->st_mode = S_IFIFO;
+			break;
+		default:
+			__ensure(!resp.file_type());
+	}
+
+	result->st_dev = resp.stat_dev();
+	result->st_ino = resp.fs_inode();
+	result->st_mode |= resp.mode();
+	result->st_nlink = resp.num_links();
+	result->st_uid = resp.uid();
+	result->st_gid = resp.gid();
+	result->st_rdev = resp.ref_devnum();
+	result->st_size = resp.file_size();
+	result->st_atim.tv_sec = resp.atime_secs();
+	result->st_atim.tv_nsec = resp.atime_nanos();
+	result->st_mtim.tv_sec = resp.mtime_secs();
+	result->st_mtim.tv_nsec = resp.mtime_nanos();
+	result->st_ctim.tv_sec = resp.ctime_secs();
+	result->st_ctim.tv_nsec = resp.ctime_nanos();
+	result->st_blksize = 4096;
+	result->st_blocks = resp.file_size() / 512 + 1;
 	return 0;
 }
 
@@ -395,14 +520,14 @@ int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offse
 	auto lane = fileTable[fd];
 	HelAction actions[3];
 
-	managarm::fs::CntRequest<MemoryAllocator> req(getAllocator());
+	managarm::fs::CntRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_req_type(managarm::fs::CntReqType::SEEK_ABS);
 	req.set_rel_offset(offset);
 
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> ser(getAllocator());
+	frg::string<LdsoAllocator> ser(getLdsoAllocator());
 	req.SerializeToString(&ser);
 	actions[0].type = kHelActionOffer;
 	actions[0].flags = kHelItemAncillary;
@@ -429,7 +554,7 @@ int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offse
 	HEL_CHECK(send_req->error);
 	HEL_CHECK(recv_resp->error);
 
-	managarm::fs::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::fs::SvrResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 	__ensure(resp.error() == managarm::fs::Errors::SUCCESS);
 	*new_offset = offset;
@@ -441,14 +566,13 @@ int Sysdeps<Read>::operator()(int fd, void *data, size_t length, ssize_t *bytes_
 	auto lane = fileTable[fd];
 	HelAction actions[5];
 
-	managarm::fs::CntRequest<MemoryAllocator> req(getAllocator());
-	req.set_req_type(managarm::fs::CntReqType::READ);
+	managarm::fs::ReadRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_size(length);
 
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> ser(getAllocator());
+	frg::string<LdsoAllocator> ser(getLdsoAllocator());
 	req.SerializeToString(&ser);
 	actions[0].type = kHelActionOffer;
 	actions[0].flags = kHelItemAncillary;
@@ -486,7 +610,7 @@ int Sysdeps<Read>::operator()(int fd, void *data, size_t length, ssize_t *bytes_
 	HEL_CHECK(recv_resp->error);
 	HEL_CHECK(recv_data->error);
 
-	managarm::fs::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::fs::SvrResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 	__ensure(resp.error() == managarm::fs::Errors::SUCCESS);
 	*bytes_read = recv_data->length;
@@ -497,7 +621,7 @@ int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int
 	cacheFileTable();
 	HelAction actions[3];
 
-	managarm::posix::VmMapRequest<MemoryAllocator> req(getAllocator());
+	managarm::posix::VmMapRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_address_hint(reinterpret_cast<uintptr_t>(hint));
 	req.set_size(size);
 	req.set_mode(prot);
@@ -508,7 +632,7 @@ int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> ser(getAllocator());
+	frg::string<LdsoAllocator> ser(getLdsoAllocator());
 	req.SerializeToString(&ser);
 	actions[0].type = kHelActionOffer;
 	actions[0].flags = kHelItemAncillary;
@@ -536,7 +660,7 @@ int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int
 	HEL_CHECK(send_req->error);
 	HEL_CHECK(recv_resp->error);
 
-	managarm::posix::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::posix::VmMapResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 	__ensure(resp.error() == managarm::posix::Errors::SUCCESS);
 	*window = reinterpret_cast<void *>(resp.offset());
@@ -547,13 +671,13 @@ int Sysdeps<Close>::operator()(int fd) {
 	cacheFileTable();
 	HelAction actions[3];
 
-	managarm::posix::CloseRequest<MemoryAllocator> req(getAllocator());
+	managarm::posix::CloseRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_fd(fd);
 
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> ser(getAllocator());
+	frg::string<LdsoAllocator> ser(getLdsoAllocator());
 	req.SerializeToString(&ser);
 	actions[0].type = kHelActionOffer;
 	actions[0].flags = kHelItemAncillary;
@@ -579,7 +703,7 @@ int Sysdeps<Close>::operator()(int fd) {
 	HEL_CHECK(send_req->error);
 	HEL_CHECK(recv_resp->error);
 
-	managarm::posix::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::posix::CloseResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 	__ensure(resp.error() == managarm::posix::Errors::SUCCESS);
 	return 0;
@@ -627,8 +751,7 @@ int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
 }
 
 int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
-	managarm::posix::CntRequest<MemoryAllocator> req(getAllocator());
-	req.set_request_type(managarm::posix::CntReqType::VM_PROTECT);
+	managarm::posix::VmProtectRequest<LdsoAllocator> req(getLdsoAllocator());
 	req.set_address(reinterpret_cast<uintptr_t>(pointer));
 	req.set_size(size);
 	req.set_mode(prot);
@@ -636,7 +759,7 @@ int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
 	if (!globalQueue.valid())
 		globalQueue.initialize();
 
-	frg::string<MemoryAllocator> ser(getAllocator());
+	frg::string<LdsoAllocator> ser(getLdsoAllocator());
 	req.SerializeToString(&ser);
 
 	HelAction actions[3];
@@ -664,7 +787,7 @@ int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
 	HEL_CHECK(send_req->error);
 	HEL_CHECK(recv_resp->error);
 
-	managarm::posix::SvrResponse<MemoryAllocator> resp(getAllocator());
+	managarm::posix::VmProtectResponse<LdsoAllocator> resp(getLdsoAllocator());
 	resp.ParseFromArray(recv_resp->data, recv_resp->length);
 	__ensure(resp.error() == managarm::posix::Errors::SUCCESS);
 	return 0;

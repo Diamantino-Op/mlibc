@@ -18,7 +18,9 @@ jobs:
                     compiler: clang
         name: Build mlibc
         runs-on: ubuntu-latest
-        container: debian:trixie
+        container:
+            image: debian:trixie
+            options: --security-opt seccomp=unconfined --privileged
         steps:
           - name: Setup
             run: |
@@ -134,7 +136,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                sysdeps: [ironclad, keyronex, managarm, astral, zinnia, demo, obos]
+                sysdeps: [keyronex, managarm, astral, zinnia, demo, obos, ethereal]
         name: Compile sysdeps
         runs-on: ubuntu-latest
         container: debian:trixie
@@ -203,6 +205,7 @@ jobs:
                 LDFLAGS="-Wl,/tmp/libgcc.a" meson setup \
                     "-Dc_args=['-fno-stack-protector', '-U__linux__', '-Wno-error=maybe-uninitialized', '-D__${{matrix.sysdeps}}__']" \
                     "-Dcpp_args=['-fno-stack-protector', '-U__linux__', '-Wno-error=maybe-uninitialized', '-D__${{matrix.sysdeps}}__']" \
+                    "-Dmlibc_abi=next" \
                     "-Dlibgcc_dependency=false" \
                     "-Duse_freestnd_hdrs=enabled" \
                     "-Dbuild_tests=true" \

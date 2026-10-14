@@ -24,13 +24,14 @@ libc_sources += files(
 	host_machine.cpu_family() / 'assembly-asserts.cpp',
 	'generic/entry.cpp',
 	'generic/sysdeps.cpp',
+	'generic/thread.cpp',
+	host_machine.cpu_family() / 'thread_entry.S'
 )
 
 if get_option('posix_option').allowed()
 	libc_sources += files(
-		'generic/thread.cpp',
+		'generic/posix/aio.cpp',
 		host_machine.cpu_family() / 'cp_syscall.S',
-		host_machine.cpu_family() / 'thread_entry.S'
 	)
 endif
 
@@ -96,6 +97,9 @@ if not no_headers
 		'include/abi-bits/sockaddr_storage.h',
 		'include/abi-bits/sig-limits.h',
 		'include/abi-bits/sigset_t.h',
+		'include/abi-bits/aio.h',
+		'include/abi-bits/sched_param.h',
+		'include/abi-bits/clone-flags.h',
 		subdir: 'abi-bits',
 		follow_symlinks: true
 	)

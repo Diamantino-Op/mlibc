@@ -151,6 +151,24 @@ struct GetLoadavg {};
 struct Openpty {};
 #endif // __MLIBC_BSD_OPTION
 
+#if __MLIBC_BSD_PROCDESC_OPTION
+#include <abi-bits/signal.h>
+#include <sys/procdesc.h>
+
+// int sys_pdfork(int *fdp, int flags, pid_t *child);
+struct Pdfork {};
+
+// int sys_pdkill(int fd, int sig);
+struct Pdkill {};
+
+// int sys_pdgetpid(int fd, pid_t *pidp);
+struct Pdgetpid {};
+
+// int sys_pdwait(int fd, int *status, int options, struct __wrusage *rusage, siginfo_t *info);
+struct Pdwait {};
+
+#endif /* __MLIBC_BSD_PROCDESC_OPTION */
+
 #if __MLIBC_GLIBC_OPTION
 // int sys_personality(unsigned long persona, int *out);
 struct Personality {};
@@ -170,12 +188,14 @@ struct RiscvFlushIcache {};
 #include <abi-bits/seek-whence.h>
 #include <abi-bits/socklen_t.h>
 #include <abi-bits/vm-flags.h>
+#include <abi-bits/aio.h>
 #include <bits/off_t.h>
 #include <bits/posix/stat.h>
 #include <bits/ssize_t.h>
 #include <fcntl.h>
 #include <mlibc/fsfd_target.hpp>
 #include <mqueue.h>
+#include <net/if.h>
 #include <poll.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -262,6 +282,10 @@ struct SetEuid {};
 struct SetGid {};
 // int sys_setegid(gid_t egid);
 struct SetEgid {};
+// int sys_setfsuid(uid_t uid, int *out);
+struct SetFsuid {};
+// int sys_setfsgid(gid_t gid, int *out);
+struct SetFsgid {};
 // int sys_getgroups(size_t size, gid_t *list, int *ret);
 struct GetGroups {};
 // int sys_fexecve(int fd, char *const argv[], char *const envp[]);
@@ -476,6 +500,10 @@ struct GetLoginR {};
 struct IfIndextoname {};
 // int sys_if_nametoindex(const char *name, unsigned int *ret);
 struct IfNametoindex {};
+// int sys_if_nameindex(struct if_nameindex **out);
+struct IfNameindex {};
+// void sys_if_freenameindex(struct if_nameindex *ifn);
+struct IfFreeNameindex {};
 // int sys_ptsname(int fd, char *buffer, size_t length);
 struct Ptsname {};
 // int sys_unlockpt(int fd);
@@ -538,6 +566,22 @@ struct MqReceive {};
 struct MqGetAttr {};
 // int sys_mq_set_attr(mqd_t mqdes, mq_attr *mqstat, mq_attr *omqstat);
 struct MqSetAttr {};
+// int sys_aio_read(struct aiocb *cb);
+struct AioRead {};
+// int sys_aio_write(struct aiocb *cb);
+struct AioWrite {};
+// int sys_aio_fsync(int op, struct aiocb *cb);
+struct AioFsync {};
+// int sys_aio_listio(int mode, struct aiocb *__restrict const list[], int n, struct sigevent *__restrict sevp);
+struct AioListio {};
+// int sys_aio_suspend(const struct aiocb *const list[], int n, const struct timespec *ts);
+struct AioSuspend {};
+// int sys_aio_cancel(int fildes, struct aiocb *cb, int *result);
+struct AioCancel {};
+// int sys_aio_error(const struct aiocb *cb, int *out);
+struct AioError {};
+// int sys_aio_return(struct aiocb *cb, ssize_t *out);
+struct AioReturn {};
 #endif // __MLIBC_POSIX_OPTION
 
 #if __MLIBC_LINUX_OPTION
@@ -619,6 +663,8 @@ struct Fstatfs {};
 struct Statx {};
 // int sys_getifaddrs(struct ifaddrs **);
 struct Getifaddrs {};
+// void sys_freeifaddrs(struct ifaddrs *ifa);
+struct Freeifaddrs {};
 // int sys_sendfile(int outfd, int infd, off_t *offset, size_t count, ssize_t *out);
 struct Sendfile {};
 // int sys_syncfs(int fd);
@@ -649,6 +695,8 @@ struct MoveMount {};
 struct OpenTree {};
 // int sys_copy_file_range(int fd_in, off_t *off_in, int fd_out, off_t *off_out, size_t count, unsigned int flags, ssize_t *bytes_copied);
 struct CopyFileRange {};
+// int sys_renameat2(int olddirfd, const char *old_path, int newdirfd, const char *new_path, unsigned int flags);
+struct Renameat2 {};
 #endif // __MLIBC_LINUX_OPTION
 
 #if __MLIBC_LINUX_EPOLL_OPTION
