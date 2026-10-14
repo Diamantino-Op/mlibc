@@ -2,6 +2,12 @@
 #include <mlibc/allocator.hpp>
 #include <mlibc/global-config.hpp>
 
+namespace {
+
+mlibc::GlobalConfig globalConfigInstance;
+
+} // namespace
+
 namespace mlibc {
 
 namespace {

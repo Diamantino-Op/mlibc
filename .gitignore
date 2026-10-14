@@ -6,3 +6,5 @@
 .vscode
 compile_commands.json
 /linux-headers
+build/
+build-vsc/
